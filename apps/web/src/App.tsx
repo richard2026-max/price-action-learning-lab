@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import ReplayWorkbench from "./replay/ReplayWorkbench";
 import ScannerWorkbench from "./scanner/ScannerWorkbench";
+import AnalyticsWorkbench from "./analytics/AnalyticsWorkbench";
 import { Dataset, Provider, getDatasets, getHealth, listDays, seedDemo } from "./api/client";
 
 const DEMO_START = "2024-01-02";
 const DEMO_END = "2024-03-28";
 
-type Tab = "replay" | "scanner" | "data";
+type Tab = "replay" | "scanner" | "analytics" | "data";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("replay");
@@ -76,6 +77,9 @@ export default function App() {
         <button className={tab === "scanner" ? "on" : ""} onClick={() => setTab("scanner")}>
           🔍 价格行为扫描器 (Scanner)
         </button>
+        <button className={tab === "analytics" ? "on" : ""} onClick={() => setTab("analytics")}>
+          📊 学习分析与错题本 (Analytics)
+        </button>
         <button className={tab === "data" ? "on" : ""} onClick={() => setTab("data")}>
           💾 数据与环境管理 (Data)
         </button>
@@ -84,6 +88,8 @@ export default function App() {
       {tab === "replay" && <ReplayWorkbench />}
 
       {tab === "scanner" && <ScannerWorkbench onOpenReplay={handleOpenReplayFromScanner} />}
+
+      {tab === "analytics" && <AnalyticsWorkbench />}
 
       {tab === "data" && (
         <section className="panel">

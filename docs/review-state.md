@@ -149,3 +149,28 @@ Batch 8: 补齐审计遗漏交付物 + 残留一致性修正（2026-08-16，独�
      - 候选筛选列表：实时按 detector/状态/收藏/错题本过滤，支持一键打开对应日期的回放训练；
      - 证据抽屉与审核面板：展开完整 Evidence JSON，一键标记 4 档状态、选择拒绝原因、加星收藏、收入错题本。
   5. 验证：全量 53 项自动化测试全绿（新增 Scanner 端到端任务与审核测试）；Ruff 0 违规；Mypy 0 错误；前端编译打包完成。
+
+- Batch 17 完成（Phase 1: Analytics 学习分析与盲测复评全链路，2026-08-16 深夜）：
+  1. 领域模型与服务层：新增 AnalyticsService（总会话/判断/标注/审核正反例/收藏/错题统计，市场环境判断分布，反例拒绝原因归纳）；实现 get_blind_recheck_queue（严格脱敏原始标签）与 submit_recheck（test-retest 前后一致性对比）。
+  2. API 路由：新增 GET /api/v1/analytics/overview、GET /api/v1/analytics/recheck-queue 与 POST /api/v1/analytics/recheck。
+  3. 前端看板：新增「学习分析与错题本 (Analytics)」页面（四大 KPI 指标卡片、宏观环境分布、反例原因归纳、盲测复评卡片、错题本精选归档表格）。
+  4. 验证：54 项自动化测试全绿（新增 test_analytics.py 端到端测试）；Ruff 0 违规；Mypy 0 错误；前端打包通过。
+
+- Batch 18 完成（Phase 2: 模拟交易撮合与 MFE/MAE 实时追踪引擎，2026-08-16 深夜）：
+  1. 领域模型与数据库：新增 SimTradeORM 模型（持仓状态、挂单/成交时间、初始风险 Initial Risk、MFE/MAE 及对应 R 倍数、出场原因）；SQLite 数据库建表同步完成。
+  2. 模拟交易执行服务（SimTradeService）：
+     - 订单类型：市价单（当前 Bar 立即成交）、限价单（达到价格撮合）、停止单（突破触发）；
+     - 保守歧义撮合（ADR-005）：同一根 Bar 触及 Target 与 Stop 时默认止损先触发；
+     - 过程跟踪：随每根 K 线推进实时计算最大有利浮盈 (MFE) 与最大不利回撤 (MAE)，并实时折算为 R 倍数（pnl_in_r = pnl / initial_risk）。
+  3. API 路由（/trades）：POST /trades/sessions/{session_id} 下单、GET 查询会话持仓、POST /{trade_id}/exit 手动平仓。
+  4. 前端交互集成：回放工具栏新增 `🎯 T · 模拟下单` 按钮（支持快捷键 T 唤起下单弹窗）、右侧栏新增「模拟持仓与出场」卡片（实时显示挂单、持仓 MFE/MAE、盈亏 R 倍数与一键平仓）。
+  5. 验证：57 项测试全绿（新增 test_sim_trade.py 撮合与保守测试）；Ruff 0 违规；Mypy 0 错误；前端打包通过。
+
+- Batch 19 完成（Phase 3: Level 5 复杂形态识别器 + 全仓一致性收口，2026-08-16 深夜）：
+  1. Concept Specs ×3：编写 docs/concepts/ 规范（wedge.md 楔形三推衰减、climax.md 高潮反转双模式、micro-channel.md 微型通道连续不破极值）。
+  2. 识别器实现（app/detectors/complex.py）：
+     - wedge：基于确认 Swing 序列检测 3 次推进（HH1<HH2<HH3 / LL1>LL2>LL3）与推进幅度衰减；
+     - climax：单K线 2.6 倍相对波幅衰竭棒与连续 3 根强趋势K线加速高潮；
+     - micro_channel：多头（low[k]>=low[k-1]）与空头（high[k]<=high[k-1]）极窄微通道长度追踪。
+  3. 参数与全阶形态注册：升版本至 mvp-l5-0.1.0，全系统已就绪 14 类价格行为形态。
+  4. 验证：60 项测试全绿（新增 test_complex_detectors.py）；Ruff 0 违规；Mypy 0 错误；前端打包通过。

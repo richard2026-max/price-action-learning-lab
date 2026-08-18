@@ -36,7 +36,7 @@ def test_candidates_locked_until_judgment(seeded_client):
 
     ids = {c["detector_id"] for c in d1["candidates"]}
     assert {"bar_anatomy", "doji", "trend_bar", "inside_bar", "outside_bar",
-            "signal_bar_evidence"} <= ids
+            "signal_bar_evidence", "swing", "hl_counting"} <= ids
 
     # 推进后：新 bar 的候选出现（增量可见）
     d2 = seeded_client.post(f"/api/v1/replay/sessions/{sid}/advance", json={"n": 1}).json()
@@ -48,7 +48,7 @@ def test_detectors_endpoint(seeded_client):
     r = seeded_client.get("/api/v1/detectors")
     assert r.status_code == 200
     body = r.json()
-    assert body["profile_version"] == "mvp-c-0.1.0"
+    assert body["profile_version"] == "mvp-l5-0.1.0"
     ids = {d["detector_id"] for d in body["detectors"]}
-    assert len(ids) == 11  # 7 (MVP-B) + 4 (MVP-C: swing/pullback_leg/hl_counting/trend_lines)
+    assert len(ids) == 14  # 7 (MVP-B) + 4 (MVP-C) + 3 (Level 5: wedge/climax/micro_channel)
     assert all("spec" in d and "provenance" in d for d in body["detectors"])

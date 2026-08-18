@@ -1,4 +1,4 @@
-/** API 客户端（Phase 0 数据管理 + MVP-A 回放训练 + MVP-D 扫描工作台）。 */
+/** API 客户端（Phase 0 数据管理 + MVP-A 回放训练 + MVP-D 扫描工作台 + Analytics 学习分析 + SimTrade 模拟交易）。 */
 
 const BASE = "/api/v1";
 
@@ -196,6 +196,69 @@ export const addAnnotation = (id: string, provider: Provider, barIndex: number, 
 export const listAnnotations = (id: string, provider: Provider) =>
   fetch(`${BASE}/replay/sessions/${id}/annotations?${q(provider)}`).then((r) => j<Annotation[]>(r));
 
+// ---------- SimTrade (Phase 2 模拟交易) ----------
+
+export interface SimTrade {
+  id: string;
+  session_id: string;
+  instrument_id: string;
+  provider: string;
+  day: string;
+  side: "long" | "short";
+  order_type: "market" | "limit" | "stop";
+  status: "pending" | "open" | "closed" | "cancelled";
+  order_bar_index: number;
+  order_time_utc: string;
+  planned_entry_price: number;
+  actual_entry_price: number | null;
+  entry_bar_index: number | null;
+  entry_time_utc: string | null;
+  stop_price: number;
+  target_price: number;
+  initial_risk: number;
+  exit_price: number | null;
+  exit_bar_index: number | null;
+  exit_time_utc: string | null;
+  exit_reason: "target" | "stop" | "manual" | "eod" | null;
+  pnl: number | null;
+  pnl_in_r: number | null;
+  mfe_price: number | null;
+  mfe_in_r: number | null;
+  mae_price: number | null;
+  mae_in_r: number | null;
+  setup_notes: string | null;
+  reasons: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateSimTradePayload {
+  side: "long" | "short";
+  order_type?: "market" | "limit" | "stop";
+  planned_entry_price: number;
+  stop_price: number;
+  target_price: number;
+  setup_notes?: string | null;
+  reasons?: string[];
+}
+
+export const createSimTrade = (sessionId: string, provider: Provider, payload: CreateSimTradePayload) =>
+  fetch(`${BASE}/trades/sessions/${sessionId}?${q(provider)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }).then((r) => j<SimTrade>(r));
+
+export const listSessionTrades = (sessionId: string) =>
+  fetch(`${BASE}/trades/sessions/${sessionId}`).then((r) => j<SimTrade[]>(r));
+
+export const manualExitTrade = (tradeId: string, sessionId: string, provider: Provider, notes?: string) =>
+  fetch(`${BASE}/trades/${tradeId}/exit?session_id=${sessionId}&${q(provider)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ notes }),
+  }).then((r) => j<SimTrade>(r));
+
 // ---------- Scanner (MVP-D) ----------
 
 export interface ScanTask {
@@ -307,3 +370,86 @@ export interface RegisteredDetector {
 
 export const listDetectors = () =>
   fetch(`${BASE}/detectors`).then((r) => j<{ profile_version: string; detectors: RegisteredDetector[] }>(r));
+
+// ---------- Analytics & Blind Recheck ----------
+
+export interface BehaviorStats {
+  total_sessions: number;
+  completed_sessions: number;
+  total_judgments: number;
+  total_annotations: number;
+  total_reviewed_candidates: number;
+  total_confirmed_positives: number;
+  total_rejected_negatives: number;
+  total_favorites: number;
+  total_mistakes: number;
+}
+
+export interface JudgmentDistribution {
+  context_breakdown: Record<string, number>;
+  trade_decision_breakdown: Record<string, number>;
+  confidence_breakdown: Record<string, number>;
+  probability_breakdown: Record<string, number>;
+}
+
+export interface AnalyticsOverview {
+  behavior: BehaviorStats;
+  judgment: JudgmentDistribution;
+  rejections: { reason_counts: Record<string, number> };
+  recent_mistakes: Array<{
+    id: string;
+    day: string;
+    bar_index: number;
+    detector_id: string;
+    rejection_reason: string | null;
+    notes: string | null;
+    reviewed_at: string | null;
+  }>;
+  recent_favorites: Array<{
+    id: string;
+    day: string;
+    bar_index: number;
+    detector_id: string;
+    notes: string | null;
+    reviewed_at: string | null;
+  }>;
+}
+
+export interface BlindRecheckItem {
+  candidate_id: string;
+  instrument_id: string;
+  provider: string;
+  day: string;
+  bar_index: number;
+  bar_time_utc: string;
+  detector_id: string;
+  evidence: Record<string, unknown>;
+}
+
+export interface RecheckCompareResult {
+  candidate_id: string;
+  original_status: string;
+  recheck_status: string;
+  is_consistent: boolean;
+  original_reviewed_at: string | null;
+  rechecked_at: string;
+  original_notes: string | null;
+  recheck_notes: string | null;
+}
+
+export const getAnalyticsOverview = () =>
+  fetch(`${BASE}/analytics/overview`).then((r) => j<AnalyticsOverview>(r));
+
+export const getRecheckQueue = (limit: number = 20) =>
+  fetch(`${BASE}/analytics/recheck-queue?limit=${limit}`).then((r) => j<BlindRecheckItem[]>(r));
+
+export const submitRecheck = (candidateId: string, recheckStatus: string, recheckNotes?: string) =>
+  fetch(`${BASE}/analytics/recheck`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      candidate_id: candidateId,
+      recheck_status: recheckStatus,
+      recheck_notes: recheckNotes,
+    }),
+  }).then((r) => j<RecheckCompareResult>(r));

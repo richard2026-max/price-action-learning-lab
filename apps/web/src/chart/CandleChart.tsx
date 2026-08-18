@@ -19,7 +19,18 @@ import type { Bar, KeyLevels } from "../api/client";
 
 export interface ChartMarker {
   time: string; // bar ts_open_utc
-  kind: "inside" | "outside" | "ii" | "iii" | "ioi" | "swing_high" | "swing_low" | "hl";
+  kind:
+    | "inside"
+    | "outside"
+    | "ii"
+    | "iii"
+    | "ioi"
+    | "swing_high"
+    | "swing_low"
+    | "hl"
+    | "wedge"
+    | "climax"
+    | "micro_channel";
 }
 
 interface Props {
@@ -49,30 +60,30 @@ export default function CandleChart({ bars, ema20, keyLevels, markers }: Props) 
     if (!boxRef.current) return;
     const chart = createChart(boxRef.current, {
       layout: {
-        background: { type: ColorType.Solid, color: "#12161c" },
-        textColor: "#8b96a3",
+        background: { type: ColorType.Solid, color: "#10141a" },
+        textColor: "#8b949e",
         fontSize: 11,
       },
       grid: {
-        vertLines: { color: "#1c232c" },
-        horzLines: { color: "#1c232c" },
+        vertLines: { color: "#1c222b" },
+        horzLines: { color: "#1c222b" },
       },
       width: boxRef.current.clientWidth,
       height: boxRef.current.clientHeight,
       timeScale: { timeVisible: true, secondsVisible: false, rightOffset: 3 },
-      rightPriceScale: { borderColor: "#2a323d" },
+      rightPriceScale: { borderColor: "#28303c" },
       crosshair: { mode: 0 },
       autoSize: true,
     });
     candleRef.current = chart.addCandlestickSeries({
-      upColor: "#2e9e6b",
-      downColor: "#d05555",
-      wickUpColor: "#2e9e6b",
-      wickDownColor: "#d05555",
+      upColor: "#26a69a",
+      downColor: "#ef5350",
+      wickUpColor: "#26a69a",
+      wickDownColor: "#ef5350",
       borderVisible: false,
     });
     emaRef.current = chart.addLineSeries({
-      color: "#e8c66a",
+      color: "#f0b90b",
       lineWidth: 1,
       priceLineVisible: false,
       lastValueVisible: false,
@@ -144,6 +155,9 @@ export default function CandleChart({ bars, ema20, keyLevels, markers }: Props) 
       swing_high: { position: "aboveBar", shape: "arrowDown", color: "#4da3ff", text: "SH" },
       swing_low: { position: "belowBar", shape: "arrowUp", color: "#4da3ff", text: "SL" },
       hl: { position: "belowBar", shape: "square", color: "#7ee2a8", text: "" },
+      wedge: { position: "aboveBar", shape: "square", color: "#9c27b0", text: "Wedge" },
+      climax: { position: "aboveBar", shape: "arrowDown", color: "#ef5350", text: "Climax" },
+      micro_channel: { position: "belowBar", shape: "circle", color: "#26a69a", text: "MC" },
     };
     series.setMarkers(
       (markers ?? [])

@@ -6,8 +6,10 @@ from fastapi import Request
 
 from app.domain.instrument import Instrument
 from app.replay.service import ReplayService
+from app.services.analytics_service import AnalyticsService
 from app.services.market_data import MarketDataStore
 from app.services.scanner_service import ScannerService
+from app.services.sim_trade_service import SimTradeService
 
 
 def get_replay_service(request: Request) -> ReplayService:
@@ -16,6 +18,14 @@ def get_replay_service(request: Request) -> ReplayService:
 
 def get_scanner_service(request: Request) -> ScannerService:
     return request.app.state.scanner_service
+
+
+def get_analytics_service(request: Request) -> AnalyticsService:
+    return request.app.state.analytics_service
+
+
+def get_sim_trade_service(request: Request) -> SimTradeService:
+    return request.app.state.sim_trade_service
 
 
 def get_store(request: Request) -> MarketDataStore:

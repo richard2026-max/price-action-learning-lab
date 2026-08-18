@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from app.detectors.bar_facts import register_bar_facts
 from app.detectors.base import Candidate, all_detectors
+from app.detectors.complex import register_complex
 from app.detectors.patterns import register_patterns
 from app.detectors.structure import HL_STATE, register_structure
 from app.domain.bar import Bar
@@ -22,6 +23,7 @@ def _ensure_registered() -> None:
         register_bar_facts()
         register_patterns()
         register_structure()
+        register_complex()
         _registered = True
 
 

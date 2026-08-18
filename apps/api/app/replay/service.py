@@ -3,7 +3,8 @@
 - 服务端持有全天K线，API 响应一律裁剪为 bars[0..cursor]；
 - cursor 为服务端权威状态（SQLite），不信任客户端；
 - EMA/关键价位只用"当时已知"数据计算（前日+盘前为已结束时段；EMA 以前日 RTH 收盘序列预热）；
-- 判断（judgment）提交即锁定，bar_index 取服务端 cursor。
+- 判断（judgment）提交即锁定，bar_index 取服务端 cursor；
+- 模拟交易自动随 cursor 推进触发撮合与 MFE/MAE 更新。
 """
 
 from __future__ import annotations
@@ -44,10 +45,17 @@ class _DayData:
 
 
 class ReplayService:
-    def __init__(self, store: MarketDataStore, calendar: XNYSCalendar, repo: ReplayRepository) -> None:
+    def __init__(
+        self,
+        store: MarketDataStore,
+        calendar: XNYSCalendar,
+        repo: ReplayRepository,
+        trade_service: object | None = None,
+    ) -> None:
         self._store = store
         self._cal = calendar
         self._repo = repo
+        self._trade_service = trade_service
 
     # ---------- 数据加载（服务端全量；不下发） ----------
     def _load(self, instrument: Instrument, day) -> _DayData:
@@ -142,7 +150,16 @@ class ReplayService:
             raise ReplayError("not_found", "session 不存在", 404)
         data = self._load(instrument, orm.day)
         last = len(data.rth_bars) - 1
-        orm.cursor_index = min(orm.cursor_index + req.n, last)
+
+        target_index = min(orm.cursor_index + req.n, last)
+
+        # 若绑定了模拟交易服务，随每根推进依次撮合订单与追踪 MFE/MAE
+        if self._trade_service and hasattr(self._trade_service, "process_bar_advancement"):
+            for step_idx in range(orm.cursor_index + 1, target_index + 1):
+                step_bar = data.rth_bars[step_idx]
+                self._trade_service.process_bar_advancement(session_id, step_bar, step_idx)
+
+        orm.cursor_index = target_index
         if orm.cursor_index >= last:
             orm.state = "completed"
         self._repo.update(orm)
@@ -193,6 +210,7 @@ class ReplayService:
         key_levels = self._key_levels(data)
         ema = self._ema20_visible(data, orm.cursor_index)
         bar = data.rth_bars[orm.cursor_index]
+
         # Predict First：会话存在已提交判断才解锁系统候选（先判断后揭晓）
         candidates: list[CandidateOut] = []
         if self._repo.list_judgments(orm.id):
@@ -206,6 +224,7 @@ class ReplayService:
                 )
                 for c in compute_candidates(data.prev_day_rth, visible)
             ]
+
         return SessionDetailOut(
             session_id=orm.id,
             bars=[
@@ -249,8 +268,7 @@ class ReplayService:
 
     @staticmethod
     def _ema20_visible(data: _DayData, cursor_index: int) -> list[float | None]:
-        """EMA20：以前一交易日 RTH 收盘序列预热（已结束时段，无前视），再迭代当日可见K线。
-        前日数据不足 20 根时，早期值返回 None（不伪造有效 EMA）。"""
+        """EMA20：以前一交易日 RTH 收盘序列预热（已结束时段，无前视），再迭代当日可见K线。"""
         k = 2.0 / 21.0
         warmup_closes = [b.close for b in data.prev_day_rth]
         visible_closes = [b.close for b in data.rth_bars[: cursor_index + 1]]

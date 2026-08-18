@@ -74,10 +74,7 @@ body {
   min-height: 100vh;
 }
 
-/* ==========================================================================
-   Layout Containers
-   ========================================================================== */
-
+/* Layout Containers */
 .app {
   max-width: 1560px;
   margin: 0 auto;
@@ -178,10 +175,7 @@ nav.app-tabs button.on {
   border: 1px solid var(--border-default);
 }
 
-/* ==========================================================================
-   Standard Components (Panels, Cards, Buttons, Tables)
-   ========================================================================== */
-
+/* Standard Components */
 .panel {
   background: var(--bg-surface-0);
   border: 1px solid var(--border-subtle);
@@ -189,7 +183,6 @@ nav.app-tabs button.on {
   box-shadow: var(--shadow-sm);
 }
 
-/* Buttons */
 button {
   display: inline-flex;
   align-items: center;
@@ -262,7 +255,6 @@ button.small {
   font-size: 11.5px;
 }
 
-/* Status Badges & Pills */
 .pill {
   font-size: 11px;
   font-weight: 600;
@@ -302,7 +294,6 @@ button.small {
   color: var(--accent-blue);
 }
 
-/* Inputs & Selects */
 select, input[type="text"], input[type="number"], textarea {
   background: var(--bg-surface-1);
   border: 1px solid var(--border-default);
@@ -320,7 +311,6 @@ select:focus, input:focus, textarea:focus {
   box-shadow: 0 0 0 2px var(--accent-blue-dim);
 }
 
-/* Key-Value Tables */
 table.kv {
   width: 100%;
   border-collapse: collapse;
@@ -350,7 +340,6 @@ table.kv td:last-child {
   color: var(--fg-primary);
 }
 
-/* Toast Message */
 .msg {
   position: fixed;
   bottom: 24px;
@@ -376,10 +365,7 @@ table.kv td:last-child {
   to { transform: translate(-50%, 0); opacity: 1; }
 }
 
-/* ==========================================================================
-   Replay Workbench (回放工作台)
-   ========================================================================== */
-
+/* Replay Workbench */
 .workbench {
   display: grid;
   grid-template-columns: 1fr 310px;
@@ -518,7 +504,6 @@ table.kv td:last-child {
   line-height: 1.4;
 }
 
-/* Setup Screen */
 .setup-container {
   max-width: 680px;
   margin: 32px auto;
@@ -565,10 +550,7 @@ table.kv td:last-child {
   align-items: center;
 }
 
-/* ==========================================================================
-   Predict First Modal Form (判断弹窗)
-   ========================================================================== */
-
+/* Predict First Modal */
 .modal-mask {
   position: fixed;
   inset: 0;
@@ -680,10 +662,7 @@ table.kv td:last-child {
   border-radius: var(--radius-sm);
 }
 
-/* ==========================================================================
-   Scanner Workbench (扫描工作台)
-   ========================================================================== */
-
+/* Scanner Workbench */
 .scanner-wb {
   display: flex;
   flex-direction: column;
@@ -803,4 +782,101 @@ table.kv td:last-child {
   color: #79c0ff;
   max-height: 180px;
   overflow-y: auto;
+}
+
+/* ==========================================================================
+   Analytics Workbench (学习分析与错题本大屏)
+   ========================================================================== */
+
+.analytics-wb {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.kpi-card {
+  background: var(--bg-surface-0);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: var(--shadow-sm);
+}
+
+.kpi-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--fg-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.kpi-value {
+  font-size: 26px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  color: var(--fg-primary);
+  line-height: 1.1;
+}
+
+.kpi-value small {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+
+.analytics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.recheck-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.recheck-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--bg-surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 14px;
+}
+
+.recheck-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+
+.recheck-result-box {
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  font-size: 12px;
+  animation: slideUp 0.15s ease;
+}
+
+.recheck-result-box.ok {
+  background: var(--bull-dim);
+  border: 1px solid rgba(38, 166, 154, 0.4);
+  color: var(--bull);
+}
+
+.recheck-result-box.mismatch {
+  background: var(--bear-dim);
+  border: 1px solid rgba(239, 83, 80, 0.4);
+  color: var(--bear);
 }

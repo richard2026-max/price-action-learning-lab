@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM 模型（事务型应用数据：回放、判断、标注、扫描任务、候选记录与审核）。"""
+"""SQLAlchemy ORM 模型（事务型应用数据：回放、判断、标注、扫描任务、候选记录、模拟交易）。"""
 
 from __future__ import annotations
 
@@ -113,3 +113,55 @@ class CandidateRecordORM(Base):
     is_mistake_notebook: Mapped[bool] = mapped_column(Boolean, default=False)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class SimTradeORM(Base):
+    """模拟交易记录（Level 6 交易管理训练）。
+
+    支持市价单、限价单与停止单；撮合规则默认保守（pessimistic）；
+    实时追踪 MFE（最大有利位移）与 MAE（最大不利位移）。
+    """
+
+    __tablename__ = "sim_trades"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)  # uuid4 hex
+    session_id: Mapped[str] = mapped_column(ForeignKey("replay_sessions.id", ondelete="CASCADE"), index=True)
+    instrument_id: Mapped[str] = mapped_column(String(16))
+    provider: Mapped[str] = mapped_column(String(16))
+    day: Mapped[date] = mapped_column(Date)
+    side: Mapped[str] = mapped_column(String(8))  # "long" | "short"
+    order_type: Mapped[str] = mapped_column(String(16))  # "market" | "limit" | "stop"
+    status: Mapped[str] = mapped_column(String(16), default="pending")  # pending | open | closed | cancelled
+
+    # 计划与成交价格
+    order_bar_index: Mapped[int] = mapped_column(Integer)
+    order_time_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    planned_entry_price: Mapped[float] = mapped_column(Float)
+    actual_entry_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    entry_bar_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    entry_time_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # 风险与目标管理（Brooks 交易方程式）
+    stop_price: Mapped[float] = mapped_column(Float)  # 失效点
+    target_price: Mapped[float] = mapped_column(Float)  # 目标止盈
+    initial_risk: Mapped[float] = mapped_column(Float)  # |entry - stop|
+
+    # 出场与收益统计
+    exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    exit_bar_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    exit_time_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    exit_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)  # target | stop | manual | eod
+    pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pnl_in_r: Mapped[float | None] = mapped_column(Float, nullable=True)  # PnL / initial_risk
+
+    # 路径保真统计 (MFE / MAE)
+    mfe_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    mfe_in_r: Mapped[float | None] = mapped_column(Float, nullable=True)
+    mae_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    mae_in_r: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # 逻辑与笔记
+    setup_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reasons: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)

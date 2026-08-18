@@ -1,4 +1,4 @@
-"""initial schema: replay_sessions / judgments / annotations / scan_tasks / candidate_records
+"""initial schema: replay_sessions / judgments / annotations / scan_tasks / candidate_records / sim_trades
 
 Revision ID: 0001
 Revises:
@@ -108,9 +108,47 @@ def upgrade() -> None:
         sa.Column("reviewed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
+    op.create_table(
+        "sim_trades",
+        sa.Column("id", sa.String(32), primary_key=True),
+        sa.Column(
+            "session_id", sa.String(32),
+            sa.ForeignKey("replay_sessions.id", ondelete="CASCADE"), nullable=False, index=True,
+        ),
+        sa.Column("instrument_id", sa.String(16), nullable=False),
+        sa.Column("provider", sa.String(16), nullable=False),
+        sa.Column("day", sa.Date(), nullable=False),
+        sa.Column("side", sa.String(8), nullable=False),
+        sa.Column("order_type", sa.String(16), nullable=False),
+        sa.Column("status", sa.String(16), nullable=False, server_default="pending"),
+        sa.Column("order_bar_index", sa.Integer(), nullable=False),
+        sa.Column("order_time_utc", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("planned_entry_price", sa.Float(), nullable=False),
+        sa.Column("actual_entry_price", sa.Float(), nullable=True),
+        sa.Column("entry_bar_index", sa.Integer(), nullable=True),
+        sa.Column("entry_time_utc", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("stop_price", sa.Float(), nullable=False),
+        sa.Column("target_price", sa.Float(), nullable=False),
+        sa.Column("initial_risk", sa.Float(), nullable=False),
+        sa.Column("exit_price", sa.Float(), nullable=True),
+        sa.Column("exit_bar_index", sa.Integer(), nullable=True),
+        sa.Column("exit_time_utc", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("exit_reason", sa.String(32), nullable=True),
+        sa.Column("pnl", sa.Float(), nullable=True),
+        sa.Column("pnl_in_r", sa.Float(), nullable=True),
+        sa.Column("mfe_price", sa.Float(), nullable=True),
+        sa.Column("mfe_in_r", sa.Float(), nullable=True),
+        sa.Column("mae_price", sa.Float(), nullable=True),
+        sa.Column("mae_in_r", sa.Float(), nullable=True),
+        sa.Column("setup_notes", sa.Text(), nullable=True),
+        sa.Column("reasons", sa.JSON(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+    )
 
 
 def downgrade() -> None:
+    op.drop_table("sim_trades")
     op.drop_table("candidate_records")
     op.drop_table("scan_tasks")
     op.drop_table("annotations")

@@ -1,5 +1,5 @@
 /**
- * MVP-A 回放工作台（专业金融终端风格重构版）。
+ * MVP-A/Phase 2/Phase 3 回放工作台（整合 Level 1-5 全阶价格行为形态与模拟交易）。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -9,10 +9,13 @@ import {
   addAnnotation,
   advance,
   createSession,
+  createSimTrade,
   getSession,
   goBack,
   listDays,
   listJudgments,
+  listSessionTrades,
+  manualExitTrade,
   randomDay,
   submitJudgment,
   type Candidate,
@@ -20,6 +23,7 @@ import {
   type JudgmentPayload,
   type Provider,
   type SessionDetail,
+  type SimTrade,
 } from "../api/client";
 
 const SPEEDS = [
@@ -75,6 +79,14 @@ export default function ReplayWorkbench() {
   const [speedMs, setSpeedMs] = useState(1000);
   const [judgmentOpen, setJudgmentOpen] = useState(false);
   const [judgments, setJudgments] = useState<Judgment[]>([]);
+  const [trades, setTrades] = useState<SimTrade[]>([]);
+  const [tradeFormOpen, setTradeFormOpen] = useState(false);
+  const [tradeSide, setTradeSide] = useState<"long" | "short">("long");
+  const [tradeOrderType, setTradeOrderType] = useState<"market" | "limit" | "stop">("market");
+  const [tradeEntry, setTradeEntry] = useState("");
+  const [tradeStop, setTradeStop] = useState("");
+  const [tradeTarget, setTradeTarget] = useState("");
+  const [tradeNotes, setTradeNotes] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
   const [noteText, setNoteText] = useState("");
   const [msg, setMsg] = useState("");
@@ -86,8 +98,9 @@ export default function ReplayWorkbench() {
     listDays(provider).then(setDays).catch((e) => setMsg(`获取日期失败：${e}`));
   }, [provider]);
 
-  const refreshJudgments = useCallback((sid: string, p: Provider) => {
+  const refreshData = useCallback((sid: string, p: Provider) => {
     listJudgments(sid, p).then(setJudgments).catch(() => setJudgments([]));
+    listSessionTrades(sid).then(setTrades).catch(() => setTrades([]));
   }, []);
 
   const apply = useCallback((d: SessionDetail) => {
@@ -104,7 +117,7 @@ export default function ReplayWorkbench() {
         setDetail(d);
         setDay(d.info.day);
         setProvider((d.info.provider as Provider) ?? "synthetic");
-        refreshJudgments(d.session_id, (d.info.provider as Provider) ?? "synthetic");
+        refreshData(d.session_id, (d.info.provider as Provider) ?? "synthetic");
       })
       .catch(() =>
         getSession(last, "hfdl")
@@ -112,11 +125,11 @@ export default function ReplayWorkbench() {
             setDetail(d);
             setDay(d.info.day);
             setProvider("hfdl");
-            refreshJudgments(d.session_id, "hfdl");
+            refreshData(d.session_id, "hfdl");
           })
           .catch(() => localStorage.removeItem(LAST_SESSION_KEY)),
       );
-  }, [refreshJudgments]);
+  }, [refreshData]);
 
   const start = async (d: string) => {
     if (!d) return;
@@ -126,7 +139,7 @@ export default function ReplayWorkbench() {
       const det = await createSession(d, mode, warmup, provider);
       apply(det);
       setDay(d);
-      refreshJudgments(det.session_id, curProvider(det));
+      refreshData(det.session_id, curProvider(det));
       setMsg("");
     } catch (e) {
       setMsg(`创建会话失败：${e}`);
@@ -153,34 +166,38 @@ export default function ReplayWorkbench() {
     }
     advLock.current = true;
     try {
-      apply(await advance(detail.session_id, curProvider(detail), 1));
+      const prov = curProvider(detail);
+      apply(await advance(detail.session_id, prov, 1));
+      refreshData(detail.session_id, prov);
     } catch (e) {
       setMsg(String(e));
       setPlaying(false);
     } finally {
       advLock.current = false;
     }
-  }, [detail, apply]);
+  }, [detail, apply, refreshData]);
 
   const doBack = useCallback(async () => {
     if (!detail || mode !== "free") return;
     try {
-      apply(await goBack(detail.session_id, curProvider(detail)));
+      const prov = curProvider(detail);
+      apply(await goBack(detail.session_id, prov));
+      refreshData(detail.session_id, prov);
     } catch (e) {
       setMsg(String(e));
     }
-  }, [detail, apply, mode]);
+  }, [detail, apply, mode, refreshData]);
 
   useEffect(() => {
-    if (!playing || !detail || detail.info.is_completed || judgmentOpen) return;
+    if (!playing || !detail || detail.info.is_completed || judgmentOpen || tradeFormOpen) return;
     const t = setInterval(doAdvance, speedMs);
     return () => clearInterval(t);
-  }, [playing, speedMs, detail, doAdvance, judgmentOpen]);
+  }, [playing, speedMs, detail, doAdvance, judgmentOpen, tradeFormOpen]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || judgmentOpen) return;
+      if (tag === "INPUT" || tag === "TEXTAREA" || judgmentOpen || tradeFormOpen) return;
       if (!detail) return;
       if (e.code === "Space") {
         e.preventDefault();
@@ -194,6 +211,9 @@ export default function ReplayWorkbench() {
       } else if (e.key === "j" || e.key === "J") {
         e.preventDefault();
         setJudgmentOpen(true);
+      } else if (e.key === "t" || e.key === "T") {
+        e.preventDefault();
+        setTradeFormOpen(true);
       } else if (e.key === "m" || e.key === "M") {
         e.preventDefault();
         setNoteOpen(true);
@@ -201,14 +221,14 @@ export default function ReplayWorkbench() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [detail, doAdvance, doBack, judgmentOpen]);
+  }, [detail, doAdvance, doBack, judgmentOpen, tradeFormOpen]);
 
   const onSubmitJudgment = async (p: JudgmentPayload) => {
     if (!detail) return;
     const prov = curProvider(detail);
     await submitJudgment(detail.session_id, prov, p);
     setJudgmentOpen(false);
-    refreshJudgments(detail.session_id, prov);
+    refreshData(detail.session_id, prov);
     try {
       apply(await getSession(detail.session_id, prov));
     } catch {
@@ -216,6 +236,49 @@ export default function ReplayWorkbench() {
     }
     setMsg("判断已锁定，系统候选已揭晓 ✓");
     setTimeout(() => setMsg(""), 3000);
+  };
+
+  const handleCreateTrade = async () => {
+    if (!detail) return;
+    const prov = curProvider(detail);
+    const e = Number(tradeEntry), s = Number(tradeStop), t = Number(tradeTarget);
+    if (!tradeEntry || !tradeStop || !tradeTarget) {
+      setMsg("请填写完整的计划价格");
+      return;
+    }
+    setBusy(true);
+    try {
+      await createSimTrade(detail.session_id, prov, {
+        side: tradeSide,
+        order_type: tradeOrderType,
+        planned_entry_price: e,
+        stop_price: s,
+        target_price: t,
+        setup_notes: tradeNotes,
+      });
+      setTradeFormOpen(false);
+      setTradeNotes("");
+      refreshData(detail.session_id, prov);
+      setMsg("模拟交易订单已下达 🎯");
+      setTimeout(() => setMsg(""), 2500);
+    } catch (err) {
+      setMsg(`下单失败: ${err}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleManualExit = async (tradeId: string) => {
+    if (!detail) return;
+    const prov = curProvider(detail);
+    try {
+      await manualExitTrade(tradeId, detail.session_id, prov, "手动平仓");
+      refreshData(detail.session_id, prov);
+      setMsg("已平仓离场 ✓");
+      setTimeout(() => setMsg(""), 2000);
+    } catch (err) {
+      setMsg(`平仓失败: ${err}`);
+    }
   };
 
   const onSaveNote = async () => {
@@ -249,6 +312,9 @@ export default function ReplayWorkbench() {
       if (c.detector_id === "inside_bar" && c.result === true) m.inside = (m.inside ?? 0) + 1;
       if (c.detector_id === "outside_bar" && c.result === true) m.outside = (m.outside ?? 0) + 1;
       if (c.detector_id === "hl_counting") m[String(c.result)] = (m[String(c.result)] ?? 0) + 1;
+      if (c.detector_id === "wedge") m.wedge = (m.wedge ?? 0) + 1;
+      if (c.detector_id === "climax") m.climax = (m.climax ?? 0) + 1;
+      if (c.detector_id === "micro_channel") m.micro_channel = (m.micro_channel ?? 0) + 1;
     }
     return m;
   }, [candidates]);
@@ -274,6 +340,15 @@ export default function ReplayWorkbench() {
       if (c.detector_id === "hl_counting") {
         return [{ time: bar.ts_open_utc, kind: "hl" as const }];
       }
+      if (c.detector_id === "wedge") {
+        return [{ time: bar.ts_open_utc, kind: "wedge" as const }];
+      }
+      if (c.detector_id === "climax") {
+        return [{ time: bar.ts_open_utc, kind: "climax" as const }];
+      }
+      if (c.detector_id === "micro_channel") {
+        return [{ time: bar.ts_open_utc, kind: "micro_channel" as const }];
+      }
       return [];
     });
   }, [detail, candidates, unlocked, showMarkers]);
@@ -283,7 +358,7 @@ export default function ReplayWorkbench() {
       <div className="setup-container">
         <div className="setup-header">
           <h2>🎯 逐根回放训练 · 会话设置</h2>
-          <p className="sub">服务端权威游标 · 严格无前视偏差 · 支持历史盲测考试</p>
+          <p className="sub">服务端权威游标 · 严格无前视偏差 · 模拟交易撮合与 MFE/MAE 追踪</p>
         </div>
 
         <div className="setup-grid">
@@ -366,10 +441,18 @@ export default function ReplayWorkbench() {
 
           <div className="toolbar-group">
             <button className="gold" onClick={() => setJudgmentOpen(true)}>
-              ⚡ J · 提交判断 (Predict First)
+              ⚡ J · 提交判断
+            </button>
+            <button className="primary" onClick={() => {
+              setTradeEntry(String(lastBar?.close ?? ""));
+              setTradeStop("");
+              setTradeTarget("");
+              setTradeFormOpen(true);
+            }}>
+              🎯 T · 模拟下单
             </button>
             <button className="ghost" onClick={() => setNoteOpen(true)}>
-              📝 M · 笔记标注
+              📝 M · 笔记
             </button>
             <div className="toolbar-divider" />
             <span className={`pill ${detail.info.is_completed ? "bad" : "ok"}`}>
@@ -381,6 +464,7 @@ export default function ReplayWorkbench() {
                 setDetail(null);
                 setPlaying(false);
                 setJudgments([]);
+                setTrades([]);
               }}
             >
               ✕ 结束会话
@@ -424,9 +508,44 @@ export default function ReplayWorkbench() {
           </table>
         </div>
 
+        {/* 模拟交易持仓卡片 */}
         <div className="sidebar-card">
           <h4>
-            <span>系统候选识别器 (MVP-B/C)</span>
+            <span>模拟持仓与出场 (Sim Trades: {trades.length})</span>
+            <span className="pill blue">Level 6</span>
+          </h4>
+          {trades.length === 0 ? (
+            <p className="hint" style={{ padding: "6px 0" }}>按 <b>T</b> 或点击工具栏下单按钮开立模拟头寸。</p>
+          ) : (
+            <div className="jlist">
+              {trades.map((t) => (
+                <div key={t.id} className="jitem">
+                  <div className="jitem-header">
+                    <span className="jitem-title">
+                      {t.side === "long" ? "🟢 BUY 多" : "🔴 SELL 空"} @ {t.actual_entry_price ?? t.planned_entry_price}
+                    </span>
+                    <span className={`pill small ${t.status === "closed" ? (t.pnl && t.pnl > 0 ? "ok" : "bad") : "primary"}`}>
+                      {t.status === "closed" ? `${t.exit_reason}: ${t.pnl_in_r}R` : t.status.toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="hint" style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>
+                    S: {t.stop_price} | T: {t.target_price} | R: {t.initial_risk}
+                  </div>
+                  {t.status === "open" && (
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                      <span className="hint">MFE: +{t.mfe_in_r}R / MAE: {t.mae_in_r}R</span>
+                      <button className="small ghost" onClick={() => handleManualExit(t.id)}>平仓</button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="sidebar-card">
+          <h4>
+            <span>价格行为形态识别器 (Level 1-5)</span>
             <span className={`pill ${unlocked ? "ok" : "ghost"}`}>{unlocked ? "已解锁" : "未解锁"}</span>
           </h4>
           {!unlocked ? (
@@ -444,6 +563,9 @@ export default function ReplayWorkbench() {
                   <tr><td>摆动高低 (swing)</td><td>{cell("swing")}</td></tr>
                   <tr><td>回调状态 (pullback)</td><td>{cell("pullback_leg")}</td></tr>
                   <tr><td>计数序列 (H/L)</td><td><span className="pill primary">{cell("hl_counting")}</span></td></tr>
+                  <tr><td>微型通道 (micro_channel)</td><td><b>{cell("micro_channel")}</b></td></tr>
+                  <tr><td>楔形三推 (wedge)</td><td><b>{cell("wedge")}</b></td></tr>
+                  <tr><td>高潮反转 (climax)</td><td><b>{cell("climax")}</b></td></tr>
                 </tbody>
               </table>
               <div className="hint" style={{ marginTop: 8, fontSize: 11 }}>
@@ -451,6 +573,8 @@ export default function ReplayWorkbench() {
                 {patternCount.ii ? ` · ii ${patternCount.ii}` : ""}
                 {patternCount.iii ? ` · iii ${patternCount.iii}` : ""}
                 {patternCount.ioi ? ` · ioi ${patternCount.ioi}` : ""}
+                {patternCount.wedge ? ` · 楔形 ${patternCount.wedge}` : ""}
+                {patternCount.climax ? ` · 高潮 ${patternCount.climax}` : ""}
               </div>
               <label className="hint" style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
                 <input type="checkbox" checked={showMarkers} onChange={(e) => setShowMarkers(e.target.checked)} />
@@ -477,11 +601,6 @@ export default function ReplayWorkbench() {
                       {j.payload.direction === "long" ? "做多" : j.payload.direction === "short" ? "做空" : "不交易"}
                     </span>
                   </div>
-                  {j.payload.considering_trade && (
-                    <div className="hint" style={{ fontFamily: "var(--font-mono)" }}>
-                      E: {j.payload.entry} | S: {j.payload.stop} | T: {j.payload.target}
-                    </div>
-                  )}
                   {j.payload.reasons.length > 0 && (
                     <div className="jitem-reasons">理由：{j.payload.reasons.join("；")}</div>
                   )}
@@ -491,6 +610,58 @@ export default function ReplayWorkbench() {
           </div>
         </div>
       </aside>
+
+      {/* 模拟下单弹窗 */}
+      {tradeFormOpen && (
+        <div className="modal-mask" onClick={() => setTradeFormOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 520 }}>
+            <h3>🎯 建立模拟交易订单 (Sim Trade)</h3>
+            
+            <div className="setup-grid">
+              <div className="form-group">
+                <label>交易方向</label>
+                <div className="radio-group">
+                  <span className={`chip ${tradeSide === "long" ? "on bull" : ""}`} onClick={() => setTradeSide("long")}>做多 (Long)</span>
+                  <span className={`chip ${tradeSide === "short" ? "on bear" : ""}`} onClick={() => setTradeSide("short")}>做空 (Short)</span>
+                </div>
+              </div>
+              <div className="form-group">
+                <label>订单类型</label>
+                <select value={tradeOrderType} onChange={(e) => setTradeOrderType(e.target.value as any)}>
+                  <option value="market">市价单 (Market)</option>
+                  <option value="limit">限价单 (Limit)</option>
+                  <option value="stop">停止突破单 (Stop)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="setup-grid" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+              <div className="form-group">
+                <label>计划价格 (Entry)</label>
+                <input type="number" step="0.01" value={tradeEntry} onChange={(e) => setTradeEntry(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label>止损价 (Stop / 失效点)</label>
+                <input type="number" step="0.01" value={tradeStop} onChange={(e) => setTradeStop(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label>止盈目标价 (Target)</label>
+                <input type="number" step="0.01" value={tradeTarget} onChange={(e) => setTradeTarget(e.target.value)} />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label>入场依据与逻辑笔记 (Setup Thesis)</label>
+              <textarea rows={2} value={tradeNotes} onChange={(e) => setTradeNotes(e.target.value)} placeholder="例如：突破 20EMA 后首个 H2 二次买点..." />
+            </div>
+
+            <div className="actions">
+              <button className="ghost" onClick={() => setTradeFormOpen(false)}>取消</button>
+              <button className="primary" onClick={handleCreateTrade} disabled={busy}>确认下单</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {judgmentOpen && (
         <JudgmentForm

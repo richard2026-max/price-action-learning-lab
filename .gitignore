@@ -1,0 +1,30 @@
+# 密钥与环境
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+
+# 本地数据（行情/数据库/知识资料不入库；结构由代码生成）
+data/market/
+data/demo/
+data/imports/
+data/exports/
+data/knowledge/
+data/app.sqlite
+data/app.sqlite-wal
+data/app.sqlite-shm
+data/.write_test
+
+# 系统
+.DS_Store
+Thumbs.db

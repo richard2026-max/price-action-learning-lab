@@ -1,0 +1,21 @@
+services:
+  api:
+    build: apps/api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/srv/app/data
+    environment:
+      PALL_DATA_DIR: /srv/app/data
+      PALL_SQLITE_PATH: /srv/app/data/app.sqlite
+    # 市场数据密钥经 .env 注入（不提交）；无密钥时用合成演示数据
+    env_file:
+      - path: .env
+        required: false
+
+  web:
+    build: apps/web
+    ports:
+      - "5173:80"
+    depends_on:
+      - api

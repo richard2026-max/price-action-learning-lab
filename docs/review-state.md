@@ -174,3 +174,9 @@ Batch 8: 补齐审计遗漏交付物 + 残留一致性修正（2026-08-16，独�
      - micro_channel：多头（low[k]>=low[k-1]）与空头（high[k]<=high[k-1]）极窄微通道长度追踪。
   3. 参数与全阶形态注册：升版本至 mvp-l5-0.1.0，全系统已就绪 14 类价格行为形态。
   4. 验证：60 项测试全绿（新增 test_complex_detectors.py）；Ruff 0 违规；Mypy 0 错误；前端打包通过。
+
+- Batch 20 完成（P0: Always In 状态机 + 知识库检索，2026-08-22）：
+  1. Always In 方向状态机（docs/concepts/always-in.md, Trends PDF p15/xv）：基于已确认 Swing 序列（HH+HL→long, LH+LL→short）与 H/L 计数（H3/H4→long, L3/L4→short）组合判定；仅翻转时发出事件；transition 作为重置标记。
+  2. 知识库检索服务：KnowledgeService 基于 data/knowledge/extracted/*.txt（带 PDFPAGE 标记）建立本地全文索引；支持多关键词搜索与按 Concept 英文名检索；返回结构化引用（book/pdf_page/print_page/chunk_id/chunk_hash）；print_page 仅确定时填写否则 null。
+  3. API 路由：GET /api/v1/knowledge/search 与 GET /api/v1/knowledge/concept/{term}。
+  4. 验证：64 项测试全绿；Ruff 0 违规；Mypy 0 错误；前端构建通过。detector 总数 15 类。

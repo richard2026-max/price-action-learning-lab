@@ -30,6 +30,7 @@
 | pullback_leg | pullback / leg | Brooks Source | early | implemented (v0.1.0) | `pullback-leg.md` |
 | hl_counting | High 1-4 / Low 1-4 | Brooks Source | middle | implemented (v0.1.0) | `hl-counting.md` |
 | trend_lines | trend line / channel line | Brooks Source | middle | implemented (v0.1.0) | `trend-lines.md` |
+| always_in | always in / always-in long-short | Brooks Source | very_early | implemented (v0.1.0) | `always-in.md` |
 | wedge | wedge / 3 pushes | Brooks Source | later | implemented (v0.1.0) | `wedge.md` |
 | climax | climax / exhaustion | Brooks Source | later | implemented (v0.1.0) | `climax.md` |
 | micro_channel | micro channel / tight channel | Brooks Source | later | implemented (v0.1.0) | `micro-channel.md` |

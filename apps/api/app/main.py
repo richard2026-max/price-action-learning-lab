@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
-from app.api.routes import analytics, data, detectors, health, replay, scanner, trades
+from app.api.routes import analytics, data, detectors, health, knowledge, replay, scanner, trades
 from app.core.config import REPO_ROOT, Settings
 from app.core.logging import setup_logging
 from app.db.session import init_db, make_engine, make_session_factory
@@ -68,6 +68,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(scanner.router, prefix="/api/v1")
     app.include_router(analytics.router, prefix="/api/v1")
     app.include_router(trades.router, prefix="/api/v1")
+    app.include_router(knowledge.router, prefix="/api/v1")
 
     # 单进程模式：若前端构建产物存在，直接由后端伺服（本地单用户工具，免开 Vite dev）。
     dist = REPO_ROOT / "apps" / "web" / "dist"

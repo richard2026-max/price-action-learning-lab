@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from app.detectors.always_in import register_always_in
 from app.detectors.bar_facts import register_bar_facts
 from app.detectors.base import Candidate, all_detectors
 from app.detectors.complex import register_complex
@@ -24,6 +25,7 @@ def _ensure_registered() -> None:
         register_patterns()
         register_structure()
         register_complex()
+        register_always_in()
         _registered = True
 
 
@@ -31,6 +33,8 @@ def compute_candidates(prefix: list[Bar], visible: list[Bar]) -> list[Candidate]
     """prefix：前日RTH（仅供回看窗口）；visible：当日已可见（服务端裁剪后）。"""
     _ensure_registered()
     HL_STATE.reset()  # 状态机每会话计算从预热起点流式重放（幂等）
+    from app.detectors.always_in import AI_STATE as _AI
+    _AI.reset()
     ctx = prefix + visible
     offset = len(prefix)
     out: list[Candidate] = []

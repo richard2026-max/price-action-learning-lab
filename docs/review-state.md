@@ -186,3 +186,11 @@ Batch 8: 补齐审计遗漏交付物 + 残留一致性修正（2026-08-16，独�
   2. Detector 实现与注册：spike_and_channel / final_flag 加入 register_advanced()；detector 总数达 19 类；profile 升至 mvp-l3l5-0.1.0。
   3. Bug 修复：advanced.py backward search 中 anatomy([single_bar],0) 导致 relative_range=None 的 bug（改为传入完整 ctx）；climax_bar 未定义变量。
   4. 验证：69 项测试全绿；Ruff 0 违规；Mypy 0 错误；前端构建通过。
+
+- Batch 23 完成（day_type / 复习调度 / AI Coach / 知识库检索 API / 用户手册，2026-08-23）：
+  1. day_type 日类型分类服务：trend_from_open_bull/bear、trading_range_day、spike_and_channel_day、other；API GET /analytics/day-type。
+  2. 复习调度器：ReviewScheduler 基于 reviewed_at 筛选 N 天前审核过的候选；GET /reviews/due。
+  3. AI Coach 服务：provider-neutral 抽象（DisabledLLMProvider/OpenAICompatProvider）；知识库检索 + 结构化回答（书中定义/机械近似/AI 解释三段式）；默认禁用。
+  4. 知识库检索 API：GET /knowledge/search（多关键词全文检索）与 GET /knowledge/concept/{term}。
+  5. 用户手册 docs/user-guide/getting-started.md。
+  6. 验证：75 项测试全绿；Ruff 0 违规；Mypy 0 错误；前端构建通过。

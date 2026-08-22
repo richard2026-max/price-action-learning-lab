@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from app.detectors.advanced import register_advanced
 from app.detectors.always_in import register_always_in
 from app.detectors.bar_facts import register_bar_facts
 from app.detectors.base import Candidate, all_detectors
@@ -26,6 +27,7 @@ def _ensure_registered() -> None:
         register_structure()
         register_complex()
         register_always_in()
+        register_advanced()
         _registered = True
 
 

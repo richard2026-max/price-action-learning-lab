@@ -106,4 +106,4 @@ def test_knowledge_search_by_concept():
 
 def test_detector_registry_has_15():
     _setup()
-    assert len(all_detectors()) == 17  # 11 prior + wedge/climax/micro_channel/always_in/signal_bar_evidence
+    assert len(all_detectors()) == 19  # 11 prior + wedge/climax/micro_channel/always_in/signal_bar_evidence

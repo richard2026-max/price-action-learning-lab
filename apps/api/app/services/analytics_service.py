@@ -156,3 +156,54 @@ class AnalyticsService:
                 original_notes=orm.review_notes,
                 recheck_notes=req.recheck_notes,
             )
+
+    def get_trade_stats(self) -> dict:
+        """模拟交易统计仪表盘：胜率、期望值、R 分布、盈亏比。"""
+        from app.models.orm import SimTradeORM
+
+        with self._factory() as s:
+            all_trades = s.scalars(select(SimTradeORM)).all()
+            total = len(all_trades)
+            closed = [t for t in all_trades if t.status == "closed"]
+            open_t = total - len(closed)
+
+            wins = sum(1 for t in closed if t.pnl_in_r and t.pnl_in_r > 0)
+            losses = sum(1 for t in closed if t.pnl_in_r and t.pnl_in_r < 0)
+
+            win_rate = round(wins / len(closed), 4) if closed else None
+            pnl_values = [t.pnl_in_r for t in closed if t.pnl_in_r is not None]
+            avg_pnl = round(sum(pnl_values) / len(pnl_values), 4) if pnl_values else None
+            best = round(max(pnl_values), 4) if pnl_values else None
+            worst = round(min(pnl_values), 4) if pnl_values else None
+
+            mfe_vals = [t.mfe_in_r for t in closed if t.mfe_in_r is not None]
+            mae_vals = [t.mae_in_r for t in closed if t.mae_in_r is not None]
+            avg_mfe = round(sum(mfe_vals) / len(mfe_vals), 4) if mfe_vals else None
+            avg_mae = round(sum(mae_vals) / len(mae_vals), 4) if mae_vals else None
+
+            # Expectancy = (win_rate × avg_win_R) + (loss_rate × avg_loss_R)
+            gross_profit = sum(p for p in pnl_values if p > 0)
+            gross_loss = abs(sum(p for p in pnl_values if p < 0))
+            expectancy = round(avg_pnl, 4) if avg_pnl is not None else None
+            if gross_loss > 0:
+                profit_factor = round(gross_profit / gross_loss, 4)
+            elif gross_profit == 0:
+                profit_factor = None
+            else:
+                profit_factor = float("inf")
+
+            return {
+                "total_trades": total,
+                "closed_trades": len(closed),
+                "open_trades": open_t,
+                "wins": wins,
+                "losses": losses,
+                "win_rate": win_rate,
+                "avg_pnl_in_r": avg_pnl,
+                "best_trade_r": best,
+                "worst_trade_r": worst,
+                "avg_mfe_in_r": avg_mfe,
+                "avg_mae_in_r": avg_mae,
+                "expectancy_in_r": expectancy,
+                "profit_factor": profit_factor,
+            }

@@ -48,7 +48,7 @@ def test_detectors_endpoint(seeded_client):
     r = seeded_client.get("/api/v1/detectors")
     assert r.status_code == 200
     body = r.json()
-    assert body["profile_version"] == "mvp-l5-0.1.0"
+    assert body["profile_version"] == "mvp-l3l5-0.1.0"
     ids = {d["detector_id"] for d in body["detectors"]}
-    assert len(ids) == 15  # 7(MVP-B)+4(MVP-C)+3(L5)+1(always_in)
+    assert len(ids) == 17  # 11 prior + wedge/climax/micro_channel/breakout/double_top_bottom/always_in
     assert all("spec" in d and "provenance" in d for d in body["detectors"])

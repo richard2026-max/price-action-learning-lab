@@ -1,4 +1,4 @@
-"""学习分析与盲测复评 API 路由。"""
+"""学习分析、盲测复评与交易统计 API 路由。"""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from app.schemas.analytics import (
     BlindRecheckItem,
     RecheckCompareResult,
     SubmitRecheckIn,
+    TradeStatsOut,
 )
 from app.services.analytics_service import AnalyticsService
 
@@ -19,6 +20,11 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 @router.get("/overview", response_model=AnalyticsOverviewOut)
 def get_overview(svc: AnalyticsService = Depends(get_analytics_service)) -> AnalyticsOverviewOut:
     return svc.get_overview()
+
+
+@router.get("/trade-stats", response_model=TradeStatsOut)
+def get_trade_stats(svc: AnalyticsService = Depends(get_analytics_service)) -> TradeStatsOut:
+    return TradeStatsOut(**svc.get_trade_stats())
 
 
 @router.get("/recheck-queue", response_model=list[BlindRecheckItem])

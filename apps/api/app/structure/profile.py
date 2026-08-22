@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-DETECTOR_PROFILE_VERSION = "mvp-l5-0.1.0"
+DETECTOR_PROFILE_VERSION = "mvp-l3l5-0.1.0"
 
 PARAMS: dict[str, float | int] = {
     # ---- Level 1-2 基础单K线与几何事实 ----
@@ -18,6 +18,10 @@ PARAMS: dict[str, float | int] = {
     # ---- Level 2-3 结构形态与计数 ----
     "swing_lookback": 3,                     # swing pivot 强度（左右各 N 根）
     "context_drift_window": 20,              # 净漂移上下文窗口
+
+    # ---- Level 3 突破与双顶双底 ----
+    "breakout_failed_window": 3,             # failed breakout 判定回看窗口
+    "double_tolerance_ratio": 0.25,          # 双顶/双底容差（近20根均幅的 25%）
 
     # ---- Level 5 复杂 Brooks 形态 ----
     "micro_channel_min_bars": 4,             # 微型通道连续不破极值最小根数

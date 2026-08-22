@@ -180,3 +180,9 @@ Batch 8: 补齐审计遗漏交付物 + 残留一致性修正（2026-08-16，独�
   2. 知识库检索服务：KnowledgeService 基于 data/knowledge/extracted/*.txt（带 PDFPAGE 标记）建立本地全文索引；支持多关键词搜索与按 Concept 英文名检索；返回结构化引用（book/pdf_page/print_page/chunk_id/chunk_hash）；print_page 仅确定时填写否则 null。
   3. API 路由：GET /api/v1/knowledge/search 与 GET /api/v1/knowledge/concept/{term}。
   4. 验证：64 项测试全绿；Ruff 0 违规；Mypy 0 错误；前端构建通过。detector 总数 15 类。
+
+- Batch 22 完成（P2: spike_and_channel + final_flag + 全部测试修复，2026-08-16 深夜）：
+  1. Concept Specs ×2：spike-and-channel（两阶段判定：强趋势尖刺 + 动量衰减通道）、final-flag（climax 后窄幅旗形停顿，extension < 50% climax span）。
+  2. Detector 实现与注册：spike_and_channel / final_flag 加入 register_advanced()；detector 总数达 19 类；profile 升至 mvp-l3l5-0.1.0。
+  3. Bug 修复：advanced.py backward search 中 anatomy([single_bar],0) 导致 relative_range=None 的 bug（改为传入完整 ctx）；climax_bar 未定义变量。
+  4. 验证：69 项测试全绿；Ruff 0 违规；Mypy 0 错误；前端构建通过。

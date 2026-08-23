@@ -44,6 +44,7 @@ interface Props {
 }
 
 const LEVEL_STYLES: Array<{ key: keyof KeyLevels; title: string; color: string }> = [
+  { key: "prev_day_open", title: "PDO 前日开", color: "#c98a4b" },
   { key: "prev_day_high", title: "PDH 前日高", color: "#c98a4b" },
   { key: "prev_day_low", title: "PDL 前日低", color: "#c98a4b" },
   { key: "prev_day_close", title: "PDC 前日收", color: "#9a86c9" },

@@ -60,6 +60,7 @@ export interface Bar {
 }
 
 export interface KeyLevels {
+  prev_day_open: number | null;
   prev_day_high: number | null;
   prev_day_low: number | null;
   prev_day_close: number | null;

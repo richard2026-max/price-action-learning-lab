@@ -516,6 +516,7 @@ export default function ReplayWorkbench() {
           </h4>
           <table className="kv">
             <tbody>
+              <tr><td>前日开盘 (PDO)</td><td>{kl?.prev_day_open?.toFixed(2) ?? "—"}</td></tr>
               <tr><td>前日最高 (PDH)</td><td>{kl?.prev_day_high?.toFixed(2) ?? "—"}</td></tr>
               <tr><td>前日最低 (PDL)</td><td>{kl?.prev_day_low?.toFixed(2) ?? "—"}</td></tr>
               <tr><td>前日收盘 (PDC)</td><td>{kl?.prev_day_close?.toFixed(2) ?? "—"}</td></tr>

@@ -95,11 +95,12 @@ def _day_rth_closes(seeded_client, day: str) -> list[float]:
 
 
 def test_key_levels_use_only_known_data(seeded_client):
-    """关键价位 = 前日 RTH H/L/C + 当日开盘 + 当日盘前 H/L（全部在 RTH 开盘前已知）。"""
+    """关键价位 = 前日 RTH O/H/L/C + 当日开盘 + 当日盘前 H/L（全部在 RTH 开盘前已知）。"""
     detail = _create(seeded_client)
     kl = detail["key_levels"]
     prev_closes_day = _day_rth_data(seeded_client, "2024-01-03")
 
+    assert kl["prev_day_open"] == prev_closes_day["open"]
     assert kl["prev_day_high"] == prev_closes_day["high"]
     assert kl["prev_day_low"] == prev_closes_day["low"]
     assert kl["prev_day_close"] == prev_closes_day["close"]
@@ -128,6 +129,7 @@ def _day_rth_data(seeded_client, day: str) -> dict:
     rth = [b for b in bars_5m if b.session == SessionType.RTH]
     pre = [b for b in bars_5m if b.session == SessionType.PREMARKET]
     return {
+        "open": rth[0].open,
         "high": max(b.high for b in rth),
         "low": min(b.low for b in rth),
         "close": rth[-1].close,

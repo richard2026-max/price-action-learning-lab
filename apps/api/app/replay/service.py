@@ -271,6 +271,7 @@ class ReplayService:
 
     @staticmethod
     def _key_levels(data: _DayData) -> KeyLevelsOut:
+        prev_o = data.prev_day_rth[0].open if data.prev_day_rth else None
         prev_h = max((b.high for b in data.prev_day_rth), default=None)
         prev_l = min((b.low for b in data.prev_day_rth), default=None)
         prev_c = data.prev_day_rth[-1].close if data.prev_day_rth else None
@@ -279,8 +280,14 @@ class ReplayService:
         pre_l = min((b.low for b in data.premarket_bars), default=None)
         gap = round(today_open - prev_c, 4) if (today_open is not None and prev_c is not None) else None
         return KeyLevelsOut(
-            prev_day_high=prev_h, prev_day_low=prev_l, prev_day_close=prev_c,
-            today_open=today_open, premarket_high=pre_h, premarket_low=pre_l, gap=gap,
+            prev_day_open=prev_o,
+            prev_day_high=prev_h,
+            prev_day_low=prev_l,
+            prev_day_close=prev_c,
+            today_open=today_open,
+            premarket_high=pre_h,
+            premarket_low=pre_l,
+            gap=gap,
         )
 
     @staticmethod

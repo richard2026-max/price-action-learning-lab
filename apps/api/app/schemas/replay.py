@@ -73,12 +73,13 @@ class BarOut(BaseModel):
 class KeyLevelsOut(BaseModel):
     """日线关键价位覆盖层。仅使用已结束交易时段的数据（防前视）。"""
 
-    prev_day_high: float | None = None
-    prev_day_low: float | None = None
-    prev_day_close: float | None = None
-    today_open: float | None = None
-    premarket_high: float | None = None
-    premarket_low: float | None = None
+    prev_day_open: float | None = None  # PDO (前日开盘价)
+    prev_day_high: float | None = None  # PDH (前日最高价)
+    prev_day_low: float | None = None   # PDL (前日最低价)
+    prev_day_close: float | None = None # PDC (前日收盘价)
+    today_open: float | None = None     # OPEN (今日开盘价)
+    premarket_high: float | None = None # PRE-H (盘前最高价)
+    premarket_low: float | None = None  # PRE-L (盘前最低价)
     gap: float | None = None  # today_open - prev_day_close
 
 

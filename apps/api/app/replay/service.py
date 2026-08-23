@@ -1,6 +1,6 @@
 """回放引擎（MVP-A 核心）。no lookahead by construction：
 
-- 服务端持有全天K线，API 响应一律裁剪为 bars[0..cursor]；
+- 服务端持有全天K线 + 前几日上下文K线，API 响应裁剪为 [context_bars + bars[0..cursor]]；
 - cursor 为服务端权威状态（SQLite），不信任客户端；
 - EMA/关键价位只用"当时已知"数据计算（前日+盘前为已结束时段；EMA 以前日 RTH 收盘序列预热）；
 - 判断（judgment）提交即锁定，bar_index 取服务端 cursor；
@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from app.domain.bar import Bar, SessionType, Timeframe
@@ -42,6 +42,7 @@ class _DayData:
     premarket_bars: list[Bar]
     prev_day_rth: list[Bar]
     session_close_utc: datetime | None
+    context_bars: list[Bar] = field(default_factory=list)
 
 
 class ReplayService:
@@ -58,16 +59,32 @@ class ReplayService:
         self._trade_service = trade_service
 
     # ---------- 数据加载（服务端全量；不下发） ----------
-    def _load(self, instrument: Instrument, day) -> _DayData:
+    def _load(self, instrument: Instrument, day, context_days: int = 0) -> _DayData:
         rth = self._store.read_day(instrument, Timeframe.M5, day, SessionType.RTH)
         if not rth:
             raise ReplayError("no_data", f"{day} 无 RTH 5m 数据（请先 seed/ingest）", 404)
         premarket = self._store.read_day(instrument, Timeframe.M5, day, SessionType.PREMARKET)
+
+        # 加载前几交易日作为上下文背景K线
+        context_bars: list[Bar] = []
+        if context_days > 0:
+            ctx_dates: list = []
+            d = day
+            for _ in range(context_days):
+                try:
+                    d = self._cal.prev_trading_day(d)
+                    ctx_dates.append(d)
+                except Exception:
+                    break
+            for cd in reversed(ctx_dates):
+                cb = self._store.read_day(instrument, Timeframe.M5, cd, SessionType.RTH)
+                context_bars.extend(cb)
+
         prev_day = self._cal.prev_trading_day(day)
         prev_rth = self._store.read_day(instrument, Timeframe.M5, prev_day, SessionType.RTH)
         windows = self._cal.sessions_for(day)
         rth_close = next((w.end_utc for w in windows if w.session_type == "rth"), None)
-        return _DayData(rth, premarket, prev_rth, rth_close)
+        return _DayData(rth, premarket, prev_rth, rth_close, context_bars)
 
     def available_days(self, instrument: Instrument, include_sealed: bool = False) -> list[str]:
         """获取可用交易日。默认自动排除封存考试日（避免训练污染）。"""
@@ -94,7 +111,6 @@ class ReplayService:
         return sorted(all_days) if include_sealed else training_days
 
     def sealed_exam_days(self, instrument: Instrument) -> list[str]:
-        """获取专属封存考试日列表（仅授权考试调用）。"""
         from app.services.sealed_exam import partition_days
 
         all_days = self.available_days(instrument, include_sealed=True)
@@ -115,17 +131,15 @@ class ReplayService:
         if not self._cal.is_trading_day(day):
             raise ReplayError("not_trading_day", f"{req.day} 不是交易日", 422)
 
-        # 封存集访问权限保护：普通回放模式禁止直接加载封存日
         is_sealed = is_sealed_exam_day(day)
         if is_sealed and req.mode != ReplayMode.EXAM:
             raise ReplayError(
                 "sealed_exam_day_protected",
-                f"{req.day} 为封存考试日，已被服务端严格隔离保护（防止读图前置污染）。"
-                "如需评估盲测成绩，请以 mode='exam' 创建考试会话。",
+                f"{req.day} 为封存考试日，已被服务端严格隔离保护。",
                 403,
             )
 
-        data = self._load(instrument, day)
+        data = self._load(instrument, day, context_days=req.context_days)
         if req.warmup_bars >= len(data.rth_bars):
             raise ReplayError("warmup_too_large", "warmup_bars 超过当日K线数", 422)
         orm = self._repo.create_session(
@@ -153,7 +167,6 @@ class ReplayService:
 
         target_index = min(orm.cursor_index + req.n, last)
 
-        # 若绑定了模拟交易服务，随每根推进依次撮合订单与追踪 MFE/MAE
         if self._trade_service and hasattr(self._trade_service, "process_bar_advancement"):
             for step_idx in range(orm.cursor_index + 1, target_index + 1):
                 step_bar = data.rth_bars[step_idx]
@@ -201,17 +214,17 @@ class ReplayService:
             orm.id, req.bar_index, bar.ts_close_utc, req.kind, req.label, req.text
         )
 
-    # ---------- 视图组装（唯一出口：bars 一律裁剪到 cursor） ----------
+    # ---------- 视图组装（context_bars + 训练日可见bars） ----------
     def _detail(self, orm, data: _DayData) -> SessionDetailOut:
         from app.schemas.replay import CandidateOut
         from app.services.detector_service import compute_candidates
 
         visible = data.rth_bars[: orm.cursor_index + 1]
         key_levels = self._key_levels(data)
-        ema = self._ema20_visible(data, orm.cursor_index)
         bar = data.rth_bars[orm.cursor_index]
+        context_count = len(data.context_bars)
 
-        # Predict First：会话存在已提交判断才解锁系统候选（先判断后揭晓）
+        # Predict First：会话存在已提交判断才解锁系统候选
         candidates: list[CandidateOut] = []
         if self._repo.list_judgments(orm.id):
             candidates = [
@@ -225,6 +238,9 @@ class ReplayService:
                 for c in compute_candidates(data.prev_day_rth, visible)
             ]
 
+        # 组装完整 bars 列表：前N日上下文 + 训练日可见部分
+        all_visible = data.context_bars + visible
+
         return SessionDetailOut(
             session_id=orm.id,
             bars=[
@@ -234,15 +250,16 @@ class ReplayService:
                     open=b.open, high=b.high, low=b.low, close=b.close,
                     volume=b.volume, session=b.session.value, is_complete=b.is_complete,
                 )
-                for b in visible
+                for b in all_visible
             ],
-            ema20=ema,
+            ema20=self._ema_for_all(data, orm.cursor_index),
             key_levels=key_levels,
             info=SessionInfoOut(
                 day=orm.day.isoformat(),
                 provider=orm.provider,
                 session_name="rth",
                 bar_index=orm.cursor_index,
+                context_bar_count=context_count,
                 market_time_utc=bar.ts_close_utc,
                 session_close_utc=data.session_close_utc,
                 is_completed=orm.state == "completed",
@@ -267,32 +284,33 @@ class ReplayService:
         )
 
     @staticmethod
-    def _ema20_visible(data: _DayData, cursor_index: int) -> list[float | None]:
-        """EMA20：以前一交易日 RTH 收盘序列预热（已结束时段，无前视），再迭代当日可见K线。"""
+    def _ema_for_all(data: _DayData, cursor_index: int) -> list[float | None]:
+        """EMA20 for context_bars + training day visible bars。"""
         k = 2.0 / 21.0
-        warmup_closes = [b.close for b in data.prev_day_rth]
-        visible_closes = [b.close for b in data.rth_bars[: cursor_index + 1]]
+
+        warmup = [b.close for b in data.context_bars]
+        warmup += [b.close for b in data.prev_day_rth]
+
+        all_closes = [b.close for b in data.context_bars]
+        all_closes += [b.close for b in data.rth_bars[: cursor_index + 1]]
 
         out: list[float | None] = []
         ema: float | None = None
-        if len(warmup_closes) >= 20:
-            ema = sum(warmup_closes[:20]) / 20.0
-            for c in warmup_closes[20:]:
+
+        if len(warmup) >= 20:
+            ema = sum(warmup[:20]) / 20.0
+            for c in warmup[20:]:
                 ema = c * k + ema * (1 - k)
 
-        for i, c in enumerate(visible_closes):
+        for c in all_closes:
             if ema is None:
-                window = warmup_closes + visible_closes[: i + 1]
-                if len(window) >= 20:
-                    ema = sum(window[:20]) / 20.0
-                    for w in window[20:]:
-                        ema = w * k + ema * (1 - k)
-                    out.append(round(ema, 4))
-                else:
-                    out.append(None)
-            else:
-                ema = c * k + ema * (1 - k)
-                out.append(round(ema, 4))
+                continue
+            ema = c * k + ema * (1 - k)
+            out.append(round(ema, 4))
+
+        while len(out) < len(all_closes):
+            out.insert(0, None)
+
         return out
 
 

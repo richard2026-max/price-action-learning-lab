@@ -53,6 +53,7 @@ class CreateSessionIn(BaseModel):
     timeframe: str = "5m"
     mode: ReplayMode = ReplayMode.FREE
     warmup_bars: int = Field(6, ge=0, le=100)
+    context_days: int = Field(0, ge=0, le=10, description="加载前N个交易日的K线作为背景上下文（默认0）")
 
 
 class BarOut(BaseModel):
@@ -87,8 +88,9 @@ class SessionInfoOut(BaseModel):
     day: str
     provider: str = "synthetic"
     session_name: str = "rth"
-    bar_index: int
-    market_time_utc: datetime  # 当前 cursor bar 收盘时刻
+    bar_index: int  # 训练日内的K线下标（不含上下文）
+    context_bar_count: int = 0  # 前N日上下文K线数量（bars 数组中训练日之前的K线数）
+    market_time_utc: datetime
     session_close_utc: datetime | None = None
     is_completed: bool
     mode: str

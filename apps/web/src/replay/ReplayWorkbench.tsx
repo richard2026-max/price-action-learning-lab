@@ -1,5 +1,5 @@
 /**
- * MVP-A/Phase 2/Phase 3 回放工作台（整合 Level 1-5 全阶价格行为形态与模拟交易）。
+ * MVP-A/Phase 2/Phase 3 回放工作台（整合 Level 1-5 全阶价格行为形态、前N日走势上下文背景与模拟交易）。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -74,6 +74,7 @@ export default function ReplayWorkbench() {
   const [day, setDay] = useState("");
   const [mode, setMode] = useState<"free" | "hidden_answer" | "exam">("free");
   const [warmup, setWarmup] = useState(6);
+  const [contextDays, setContextDays] = useState(2);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [playing, setPlaying] = useState(false);
   const [speedMs, setSpeedMs] = useState(1000);
@@ -136,7 +137,7 @@ export default function ReplayWorkbench() {
     setBusy(true);
     setPlaying(false);
     try {
-      const det = await createSession(d, mode, warmup, provider);
+      const det = await createSession(d, mode, warmup, provider, contextDays);
       apply(det);
       setDay(d);
       refreshData(det.session_id, curProvider(det));
@@ -323,8 +324,11 @@ export default function ReplayWorkbench() {
 
   const chartMarkers = useMemo<ChartMarker[]>(() => {
     if (!detail || !unlocked || !showMarkers) return [];
+    const ctxCount = detail.info.context_bar_count || 0;
     return candidates.flatMap((c): ChartMarker[] => {
-      const bar = detail.bars[c.bar_index];
+      // 训练日的 bar_index 加上 context_bar_count 偏移，对齐完整 bars 数组
+      const actualIdx = ctxCount + c.bar_index;
+      const bar = detail.bars[actualIdx];
       if (!bar) return [];
       if (c.detector_id === "inside_bar" && c.result === true)
         return [{ time: bar.ts_open_utc, kind: "inside" as const }];
@@ -334,7 +338,8 @@ export default function ReplayWorkbench() {
         return [{ time: bar.ts_open_utc, kind: String(c.result) as "ii" | "iii" | "ioi" }];
       if (c.detector_id === "swing" && ["swing_high", "swing_low"].includes(String(c.result))) {
         const j = (c.evidence as { swing_bar_index?: number }).swing_bar_index;
-        const sb = detail.bars[j ?? c.bar_index] ?? bar;
+        const targetIdx = ctxCount + (j ?? c.bar_index);
+        const sb = detail.bars[targetIdx] ?? bar;
         return [{ time: sb.ts_open_utc, kind: String(c.result) as "swing_high" | "swing_low" }];
       }
       if (c.detector_id === "hl_counting") {
@@ -358,7 +363,7 @@ export default function ReplayWorkbench() {
       <div className="setup-container">
         <div className="setup-header">
           <h2>🎯 逐根回放训练 · 会话设置</h2>
-          <p className="sub">服务端权威游标 · 严格无前视偏差 · 模拟交易撮合与 MFE/MAE 追踪</p>
+          <p className="sub">服务端权威游标 · 严格无前视偏差 · 支持加载前N日背景走势 · 模拟交易撮合与 MFE/MAE 追踪</p>
         </div>
 
         <div className="setup-grid">
@@ -390,7 +395,18 @@ export default function ReplayWorkbench() {
           </div>
 
           <div className="form-group">
-            <label>开盘预热 K 线数</label>
+            <label>预热天数 (前N日历史走势背景)</label>
+            <input
+              type="number"
+              min={0}
+              max={10}
+              value={contextDays}
+              onChange={(e) => setContextDays(Number(e.target.value) || 0)}
+            />
+          </div>
+
+          <div className="form-group">
+            <label>当日开盘预热 K 线数</label>
             <input
               type="number"
               min={0}
@@ -480,7 +496,10 @@ export default function ReplayWorkbench() {
           <div className="statusbar-left">
             <span>标的：<b>SPY 5m ({detail.info.provider})</b></span>
             <span>日期：<b>{detail.info.day}</b></span>
-            <span>进度：第 <b>{detail.info.bar_index + 1}</b> / 78 根</span>
+            {detail.info.context_bar_count > 0 && (
+              <span>背景：<b>{detail.info.context_bar_count} 根历史K线</b></span>
+            )}
+            <span>当日进度：第 <b>{detail.info.bar_index + 1}</b> / 78 根</span>
             <span>市场时间：<b>{fmtET(detail.info.market_time_utc)} ET</b> <span className="hint">({fmtSH(detail.info.market_time_utc)} CST)</span></span>
           </div>
           <div className="hint">
@@ -674,10 +693,10 @@ export default function ReplayWorkbench() {
 
       {noteOpen && (
         <div className="modal-mask" onClick={() => setNoteOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 440 }}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 640 }}>
             <h3>📝 添加 K 线笔记 (第 {detail.info.bar_index + 1} 根)</h3>
             <textarea
-              rows={4}
+              rows={6}
               autoFocus
               value={noteText}
               onChange={(e) => setNoteText(e.target.value)}

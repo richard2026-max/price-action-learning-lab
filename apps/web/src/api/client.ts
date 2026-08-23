@@ -73,7 +73,8 @@ export interface SessionInfo {
   day: string;
   provider: string;
   session_name: string;
-  bar_index: number;
+  bar_index: number;  // 训练日内K线下标（不含上下文）
+  context_bar_count: number;  // 前N日上下文K线数量
   market_time_utc: string;
   session_close_utc: string | null;
   is_completed: boolean;
@@ -154,11 +155,12 @@ export function createSession(
   mode: "free" | "hidden_answer" | "exam" = "free",
   warmupBars = 6,
   provider: Provider = "synthetic",
+  contextDays = 2,
 ) {
   return fetch(`${BASE}/replay/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ day, mode, warmup_bars: warmupBars, provider }),
+    body: JSON.stringify({ day, mode, warmup_bars: warmupBars, provider, context_days: contextDays }),
   }).then((r) => j<SessionDetail>(r));
 }
 

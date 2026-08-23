@@ -409,7 +409,7 @@ table.kv td:last-child {
   background: var(--bg-surface-0);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  height: 540px;
+  height: 680px;
   padding: 6px;
   position: relative;
   overflow: hidden;

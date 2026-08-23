@@ -4,6 +4,9 @@
  * 防前视说明：本组件只渲染服务端返回的 bars（已裁剪到 cursor），
  * autoscale 由图表按已渲染数据自适应——不存在读取未来价格的通道。
  * 20EMA 与关键价位同样来自服务端（EMA 以前日已收盘数据预热）。
+ *
+ * Issue #1 修复：localization.timeFormatter 显式转为 America/New_York (美东时区)，
+ * 保证底部时间轴刻度与状态栏、Brooks 美股日内开盘 09:30 严格对齐。
  */
 
 import { useEffect, useRef } from "react";
@@ -67,6 +70,15 @@ export default function CandleChart({ bars, ema20, keyLevels, markers }: Props) 
       grid: {
         vertLines: { color: "#1c222b" },
         horzLines: { color: "#1c222b" },
+      },
+      localization: {
+        timeFormatter: (time: Time) =>
+          new Intl.DateTimeFormat("en-US", {
+            timeZone: "America/New_York",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+          }).format(new Date((typeof time === "number" ? time : 0) * 1000)),
       },
       width: boxRef.current.clientWidth,
       height: boxRef.current.clientHeight,

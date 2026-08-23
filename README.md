@@ -9,15 +9,6 @@
 
 > 本文件是**所有以后 AI agent 的文档入口**。先按下列顺序阅读，建立正确上下文，再处理具体任务。
 
-### 文档状态标记
-
-| 标记 | 含义 |
-|---|---|
-| **Canonical** | 权威文档。跨文档一致性的最终依据，冲突时以此为准 |
-| **Active** | 现行有效，与 canonical 对齐，作为设计与实现依据 |
-| **Historical** | 历史参考，可追溯旧决策，不再作为权威 |
-| **Deprecated** | 已废弃，仅保留用于追溯，不得作为实现依据 |
-
 ### 推荐阅读顺序
 
 | # | 文档 | 状态 | 为什么读 |
@@ -30,41 +21,20 @@
 | 6 | [docs/architecture/architecture.md](docs/architecture/architecture.md) | Active | **系统架构**：总体架构、数据流、技术栈、关键设计原则 |
 | 7 | [docs/architecture/data-contracts-and-api.md](docs/architecture/data-contracts-and-api.md) | Active | **数据合同与 API**：K线字段、Instrument Metadata、Data Fidelity、REST 草案 |
 | 8 | [docs/architecture/domain-model.md](docs/architecture/domain-model.md) · [docs/architecture/adr-and-risks.md](docs/architecture/adr-and-risks.md) | Active | **Replay / No-Lookahead Spec**：领域模型（event_time≠knowable_time）、ADR 决策与风险 |
-| 9 | [docs/concepts/README.md](docs/concepts/README.md) | Active | **Concept Specs**：14 类 detector 规格索引（全部先规格后实现） |
+| 9 | [docs/concepts/README.md](docs/concepts/README.md) | Active | **Concept Specs**：16 类 detector 规格索引（全部先规格后实现） |
 | 10 | [docs/architecture/project-structure-and-roadmap.md](docs/architecture/project-structure-and-roadmap.md) | Active | **Roadmap / Milestones**：MVP-A/B/C/D → Later 递进 |
-| 11 | [docs/open-questions.md](docs/open-questions.md) | Active | **ADR/未决问题**：OQ-01（数据精度已验证）/ OQ-02（页码引用已补） |
+| 11 | [docs/user-guide/getting-started.md](docs/user-guide/getting-started.md) | Active | **用户手册**：全套操作指南、快捷键与真实数据接入流程 |
 
 ---
 
-## 项目定位
-
-- **学习**：理解市场背景、趋势、区间、突破、回调、失败突破等价格行为概念。
-- **训练**：历史行情逐根回放，无未来信息做出判断并记录检查（Predict First 模式）。
-- **研究**：将概念转成候选识别器，扫描大量历史数据，由用户人工复核与统计（Scanner & Analytics）。
-
-## 技术栈
-
-- 后端：Python 3.12+ / FastAPI / Polars / DuckDB / SQLAlchemy 2 / SQLite（WAL）/ Typer
-- 前端：TypeScript / React / Vite / TradingView Lightweight Charts v4
-- 容器化：Docker Compose（可选）
-
 ## 核心功能
 
-- **历史K线逐根回放训练器**（SPY 5m 单图，服务端权威游标，严格无前视，支持封存考试隔离模式）；
+- **历史K线逐根回放训练器**（SPY 5m 单图，服务端权威游标，严格无前视，支持前置加载 1~10 天连续走势背景与封存考试隔离模式）；
 - **Predict First 盘中判断表单**（十问结构、双理由规则、失效点止损校验、提交后永久锁定）；
 - **模拟交易与交易管理引擎**（市价/限价/停止单、ADR-005 保守结算、MFE/MAE 实时 R 倍数追踪、一键平仓）；
-- **价格行为形态识别器（Level 1-5 共 14 类）**（K线解剖、十字星、趋势K线、内包/外包、ii/iii/ioi、信号棒证据、Swing、回调、H1-H4/L1-L4 计数、趋势线/通道线、楔形三推、高潮反转、微型通道）；
+- **价格行为形态识别器（Level 1-5 共 19 类）**（K线解剖、十字星、趋势K线、内包/外包、ii/iii/ioi、信号棒证据、Swing、回调、H1-H4/L1-L4 计数、趋势线/通道线、双顶双底、突破/失败突破、Always In 状态机、楔形三推、高潮反转、微型通道、尖刺通道、终极旗形）；
 - **历史价格行为候选扫描器**（批量历史扫描、任务进度监控、候选多维筛选、人工 4 档审核、错题本与典型案例收藏）；
-- **学习分析与认知统计大屏**（训练总量统计、读图画像分布、反例拒绝原因归纳、盲测复评 Blind Recheck 一致性自测）。
-
-## 目录结构
-
-```
-apps/api/      后端 FastAPI 业务服务、领域模型、算法与测试
-apps/web/      前端 React 专业金融终端工作台与图表组件
-data/          本地数据（market 分区、imports 缓存、knowledge 原书文本、app.sqlite）
-docs/          规范文档（入口 docs/README.md，含 14 份 Concept Specs）
-```
+- **学习分析与认知统计大屏**（训练总量统计、读图画像分布、反例拒绝原因归纳、盲测复评 Blind Recheck 一致性自测、交易统计与日类型分类）。
 
 ## 快速开始
 
@@ -94,16 +64,20 @@ npm install
 npm run build
 ```
 
+## 提交反馈与建议 (Issues)
+
+如果你在训练过程中发现任何 Bug、看盘不顺手的地方或希望增加的新功能，欢迎直接在 GitHub 提交 Issue：
+- 点击仓库顶部的 **`Issues` -> `New Issue`**，选择 **“功能建议或 Bug 反馈”** 模板填写即可。
+
 ## 验证命令
 
 ```bash
 cd apps/api
-.venv/Scripts/python -m pytest tests/   # 60 项测试全绿（含 no-lookahead 权威断言）
+.venv/Scripts/python -m pytest tests/   # 75 项测试全绿（含 no-lookahead 权威断言）
 .venv/Scripts/python -m ruff check app tests
 .venv/Scripts/python -m mypy app
 ```
 
 ## 状态总览
 
-- **Phase 0 到 MVP-D**：✅ **100% 全链路交付**（回放训练、14 种形态识别、扫描审核、模拟交易 MFE/MAE 追踪、学习分析大屏、盲测复评、真实 SPY 历史数据）。
-- **自动化测试**：60 项全绿，Ruff 0 违规，Mypy 0 错误。
+- **Phase 0 到 MVP-D + Level 5 全部形态**：✅ **100% 全链路交付**（75 项测试全绿，Ruff 0 违规，Mypy 0 错误）。

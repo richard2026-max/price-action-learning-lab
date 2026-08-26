@@ -50,12 +50,17 @@ def ask_concept(
 
 
 @router.post("/sessions/{session_id}/judgments/{judgment_id}/review")
-def review_judgment(request: Request, session_id: str, judgment_id: int) -> CoachAnswer:
+def review_judgment(
+    request: Request,
+    session_id: str,
+    judgment_id: int,
+    refresh: bool = Query(False, description="是否强制重新调用 AI 分析"),
+) -> CoachAnswer:
     try:
         context = _extractor(request).extract(session_id, judgment_id)
     except ReplayError as error:
         raise _review_error(error) from None
-    return _coach(request).review_decision(context)
+    return _coach(request).review_decision(context, force_refresh=refresh)
 
 
 @router.get("/sessions/{session_id}/judgments/{judgment_id}/analogs")

@@ -52,6 +52,16 @@ def test_fake_provider_receives_bounded_review_prompt_and_json_response():
     assert "sim_trades" not in prompt
     assert "严禁推断或引用之后的行情" in prompt
 
+    # 第二次调用默认走缓存，不重复调用 LLM
+    second_answer = svc.review_decision(context)
+    assert second_answer.source_grounded == "book"
+    assert len(provider.calls) == 1
+
+    # force_refresh=True 强制重新调用
+    third_answer = svc.review_decision(context, force_refresh=True)
+    assert third_answer.source_grounded == "book"
+    assert len(provider.calls) == 2
+
 
 def test_markdown_json_response_is_unwrapped_and_references_stay_grounded():
     provider = FakeProvider(

@@ -221,8 +221,8 @@ export interface CoachReview {
 export const getCoachConfig = () =>
   fetch(`${BASE}/coach/config`).then((r) => j<CoachConfig>(r));
 
-export const reviewJudgmentWithCoach = (sessionId: string, judgmentId: number) =>
-  fetch(`${BASE}/coach/sessions/${sessionId}/judgments/${judgmentId}/review`, {
+export const reviewJudgmentWithCoach = (sessionId: string, judgmentId: number, refresh = false) =>
+  fetch(`${BASE}/coach/sessions/${sessionId}/judgments/${judgmentId}/review?refresh=${refresh}`, {
     method: "POST",
   }).then((r) => j<CoachReview>(r));
 

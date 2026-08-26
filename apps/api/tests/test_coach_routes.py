@@ -16,6 +16,9 @@ def test_coach_config_and_judgment_review_routes_are_available(seeded_client):
         <= reviewed.json().keys()
     )
 
+    refreshed = seeded_client.post(f"/api/v1/coach/sessions/{sid}/judgments/{judgment['id']}/review?refresh=true")
+    assert refreshed.status_code == 200
+
     summary = seeded_client.post(f"/api/v1/coach/sessions/{sid}/summary-review")
     assert summary.status_code == 200
     assert len(summary.json()["reviews"]) == 1

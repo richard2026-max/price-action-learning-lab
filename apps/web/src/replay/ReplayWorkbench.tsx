@@ -129,6 +129,40 @@ function renderLayerBody(rawText: string | undefined, fieldKey: string, emptyFal
   );
 }
 
+function getStoredReview(sessionId: string, judgmentId: number): CoachReview | null {
+  try {
+    const raw = localStorage.getItem(`pall_coach_review_${sessionId}_${judgmentId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeReview(sessionId: string, judgmentId: number, review: CoachReview): void {
+  try {
+    localStorage.setItem(`pall_coach_review_${sessionId}_${judgmentId}`, JSON.stringify(review));
+  } catch {
+    /* ignore */
+  }
+}
+
+function getStoredAnalogs(sessionId: string, judgmentId: number): AnalogMatch[] | null {
+  try {
+    const raw = localStorage.getItem(`pall_coach_analogs_${sessionId}_${judgmentId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeAnalogs(sessionId: string, judgmentId: number, analogs: AnalogMatch[]): void {
+  try {
+    localStorage.setItem(`pall_coach_analogs_${sessionId}_${judgmentId}`, JSON.stringify(analogs));
+  } catch {
+    /* ignore */
+  }
+}
+
 export default function ReplayWorkbench() {
   const [days, setDays] = useState<string[]>([]);
   const [provider, setProvider] = useState<Provider>("synthetic");
@@ -155,6 +189,8 @@ export default function ReplayWorkbench() {
   const [coachLoading, setCoachLoading] = useState(false);
   const [coachConfig, setCoachConfig] = useState<CoachConfig | null>(null);
   const [coachReview, setCoachReview] = useState<CoachReview | null>(null);
+  const [reviewCache, setReviewCache] = useState<Record<number, CoachReview>>({});
+  const [analogCache, setAnalogCache] = useState<Record<number, AnalogMatch[]>>({});
   const [analogMatches, setAnalogMatches] = useState<AnalogMatch[]>([]);
   const [coachJudgment, setCoachJudgment] = useState<Judgment | null>(null);
   const [coachError, setCoachError] = useState("");
@@ -292,29 +328,53 @@ export default function ReplayWorkbench() {
     return () => window.removeEventListener("keydown", onKey);
   }, [detail, doAdvance, doBack, judgmentOpen, tradeFormOpen]);
 
-  const openCoachReview = async (judgment: Judgment) => {
+  const openCoachReview = async (judgment: Judgment, forceRefresh = false) => {
     if (!detail) return;
     setCoachJudgment(judgment);
-    setCoachReview(null);
-    setAnalogMatches([]);
     setCoachError("");
     setCoachOpen(true);
+
+    const sid = detail.session_id;
+    const jid = judgment.id;
+
+    // 若非强制重新分析，优先使用已记忆的复盘结论，实现秒开且不重复消耗 Token
+    if (!forceRefresh) {
+      const cachedR = reviewCache[jid] || getStoredReview(sid, jid);
+      const cachedA = analogCache[jid] || getStoredAnalogs(sid, jid);
+      if (cachedR) {
+        setCoachReview(cachedR);
+        setAnalogMatches(cachedA || []);
+        setCoachLoading(false);
+        return;
+      }
+    }
+
+    setCoachReview(null);
+    setAnalogMatches([]);
     setCoachLoading(true);
     try {
       const config = await getCoachConfig();
       setCoachConfig(config);
-      const analogPromise = searchJudgmentAnalogs(detail.session_id, judgment.id)
-        .then((result) => setAnalogMatches(result.matches))
+      const analogPromise = searchJudgmentAnalogs(sid, jid)
+        .then((result) => {
+          setAnalogMatches(result.matches);
+          setAnalogCache((prev) => ({ ...prev, [jid]: result.matches }));
+          storeAnalogs(sid, jid, result.matches);
+        })
         .catch(() => setAnalogMatches([]));
+
       if (!config.configured || !config.enabled) {
         await analogPromise;
         return;
       }
+
       const [review] = await Promise.all([
-        reviewJudgmentWithCoach(detail.session_id, judgment.id),
+        reviewJudgmentWithCoach(sid, jid, forceRefresh),
         analogPromise,
       ]);
       setCoachReview(review);
+      setReviewCache((prev) => ({ ...prev, [jid]: review }));
+      storeReview(sid, jid, review);
     } catch (e) {
       setCoachError(String(e));
     } finally {
@@ -724,9 +784,34 @@ export default function ReplayWorkbench() {
                   )}
                   <div className="jitem-footer">
                     <span className="hint">已保留原始判断</span>
-                    <button className="small coach-button" onClick={() => openCoachReview(j)}>
-                      ✦ AI 对照复盘
-                    </button>
+                    <div className="jitem-actions">
+                      <button
+                        className="small coach-button"
+                        onClick={() => openCoachReview(j, false)}
+                        title={
+                          reviewCache[j.id] || (detail && getStoredReview(detail.session_id, j.id))
+                            ? "点击查看已保存的 AI 对照复盘"
+                            : "调用 AI 生成对照复盘"
+                        }
+                      >
+                        {reviewCache[j.id] || (detail && getStoredReview(detail.session_id, j.id))
+                          ? "✦ 查看复盘"
+                          : "✦ AI 对照复盘"}
+                      </button>
+                      {(reviewCache[j.id] || (detail && getStoredReview(detail.session_id, j.id))) && (
+                        <button
+                          className="small ghost coach-reanalyze-icon-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openCoachReview(j, true);
+                          }}
+                          disabled={coachLoading && coachJudgment?.id === j.id}
+                          title="重新分析：重新调用 AI 独立诊断"
+                        >
+                          🔄
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))
@@ -805,7 +890,17 @@ export default function ReplayWorkbench() {
                 <h3 id="coach-title">AI 对照复盘</h3>
                 <p className="hint">只对照提交当刻可见信息，不改写、不覆盖你的原始判断。</p>
               </div>
-              <button className="ghost small" onClick={() => setCoachOpen(false)} aria-label="关闭复盘面板">✕</button>
+              <div className="coach-header-actions">
+                <button
+                  className="small secondary coach-reanalyze-button"
+                  onClick={() => openCoachReview(coachJudgment, true)}
+                  disabled={coachLoading}
+                  title="让 AI 重新深度分析此决策点（覆盖已有记忆）"
+                >
+                  {coachLoading ? "正在重新分析…" : "🔄 重新分析"}
+                </button>
+                <button className="ghost small" onClick={() => setCoachOpen(false)} aria-label="关闭复盘面板">✕</button>
+              </div>
             </div>
 
             <div className="coach-original">

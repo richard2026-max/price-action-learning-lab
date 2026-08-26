@@ -67,6 +67,7 @@ class AICoachService:
         self._settings = settings or Settings()
         self._injected_provider = llm_provider is not None
         self._llm: LLMProvider | None = None
+        self._review_cache: dict[tuple[str, int], CoachAnswer] = {}
         # An injected provider is intentionally useful for tests/local adapters. Remote
         # DeepSeek is constructed only when both the feature flag and key are present.
         if llm_provider is not None:
@@ -116,8 +117,16 @@ class AICoachService:
         )
         return self._answer_from_text(response, refs)
 
-    def review_decision(self, context: dict[str, Any]) -> CoachAnswer:
-        """复盘一个已提交判断；context 已由 extractor 按判断边界裁剪。"""
+    def review_decision(
+        self, context: dict[str, Any], force_refresh: bool = False
+    ) -> CoachAnswer:
+        """复盘一个已提交判断；默认返回缓存结果，force_refresh=True 时强制重跑。"""
+        session_id = str(context.get("session_id", ""))
+        judgment_id = int(context.get("judgment_id", 0))
+        cache_key = (session_id, judgment_id)
+        if not force_refresh and session_id and judgment_id and cache_key in self._review_cache:
+            return self._review_cache[cache_key]
+
         query = str(context.get("judgment", {}).get("payload", {}))
         search = getattr(self._knowledge, "search", self._knowledge.search_by_concept)
         refs = search(query, max_results=5)
@@ -152,7 +161,10 @@ class AICoachService:
         )
         prompt = self.decision_review_prompt(safe_context, ref_text)
         response = self._llm.generate(self._system_prompt() + "\n" + self._review_rules(), prompt)
-        return self._answer_from_text(response, refs)
+        answer = self._answer_from_text(response, refs)
+        if session_id and judgment_id:
+            self._review_cache[cache_key] = answer
+        return answer
 
     # Compatibility aliases for callers using review terminology.
     review_judgment = review_decision

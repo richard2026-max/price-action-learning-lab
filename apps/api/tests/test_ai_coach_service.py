@@ -49,6 +49,18 @@ def test_fake_provider_receives_bounded_review_prompt_and_json_response():
     assert "严禁推断或引用之后的行情" in prompt
 
 
+def test_markdown_json_response_is_unwrapped_and_references_stay_grounded():
+    provider = FakeProvider(
+        '```json\n{"source_grounded":"依据","mechanical_approx":"规则","coach_interpretation":"诊断","references":["bad"],"insufficient_evidence":"false"}\n```'
+    )
+    svc = AICoachService(FakeKnowledge(), provider)
+    answer = svc.review_decision({"bar_index": 1, "judgment": {"payload": {"context_label": "trend"}}})
+    assert answer.source_grounded == "依据"
+    assert answer.coach_interpretation == "诊断"
+    assert answer.references[0]["book"] == "T"
+    assert answer.insufficient_evidence is False
+
+
 def test_openai_compat_provider_uses_configured_temperature(monkeypatch):
     captured = {}
 

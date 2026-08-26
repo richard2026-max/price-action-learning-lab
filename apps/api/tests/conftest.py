@@ -17,7 +17,12 @@ SEED_END = date(2024, 1, 12)  # 9 个交易日，含 2024-01-03（无早收）�
 
 @pytest.fixture()
 def app(tmp_path: Path):
-    settings = Settings(data_dir=tmp_path / "data", sqlite_path=tmp_path / "app.sqlite")
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        sqlite_path=tmp_path / "app.sqlite",
+        ai_enabled=False,
+        ai_api_key=None,
+    )
     application = create_app(settings)
     return application
 

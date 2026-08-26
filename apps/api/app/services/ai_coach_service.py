@@ -180,14 +180,28 @@ class AICoachService:
 
     @staticmethod
     def _answer_from_text(text: str, refs: list[Any]) -> CoachAnswer:
+        """解析纯 JSON、```json``` 代码块及带前后说明的 JSON。"""
+        candidate = text.strip()
+        if "```" in candidate:
+            blocks = candidate.split("```")
+            candidate = next((block.strip() for block in blocks if block.strip().startswith("{")), candidate)
+        if not candidate.startswith("{") and "{" in candidate and "}" in candidate:
+            candidate = candidate[candidate.find("{") : candidate.rfind("}") + 1]
         try:
-            obj = json.loads(text)
+            obj = json.loads(candidate)
+            model_refs = obj.get("references")
+            valid_model_refs = isinstance(model_refs, list) and all(
+                isinstance(item, dict) for item in model_refs
+            )
+            references = model_refs if valid_model_refs else [r.to_ref() for r in refs]
+            flag = obj.get("insufficient_evidence", False)
+            insufficient = flag if isinstance(flag, bool) else str(flag).lower() == "true"
             return CoachAnswer(
                 str(obj.get("source_grounded", "")),
                 str(obj.get("mechanical_approx", "")),
                 str(obj.get("coach_interpretation", "")),
-                obj.get("references") or [r.to_ref() for r in refs],
-                bool(obj.get("insufficient_evidence", False)),
+                references,
+                insufficient,
             )
         except (ValueError, TypeError):
             parts = text.split("---")

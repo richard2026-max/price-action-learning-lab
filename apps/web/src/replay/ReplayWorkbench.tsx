@@ -74,6 +74,61 @@ const CONTEXT_ZH: Record<string, string> = {
   transition: "过渡 / 不确定",
 };
 
+function cleanLayerText(text: string | undefined | null, fieldKey: string): string {
+  if (!text) return "";
+  let clean = text.trim();
+
+  // 举一反三防御 1：若文本是 ```json ... ``` 代码块包裹
+  if (clean.includes("```")) {
+    const m = clean.match(/```(?:json|JSON)?\s*([\s\S]*?)\s*```/);
+    if (m) clean = m[1].trim();
+  }
+
+  // 举一反三防御 2：若文本是整个 JSON 串（如意外包含了 "source_grounded":）
+  if (clean.startsWith("{") && clean.includes(`"${fieldKey}"`)) {
+    try {
+      const obj = JSON.parse(clean);
+      if (obj[fieldKey]) return String(obj[fieldKey]).trim();
+    } catch {
+      const reg = new RegExp(`"${fieldKey}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`);
+      const matched = clean.match(reg);
+      if (matched) {
+        try {
+          return JSON.parse(`"${matched[1]}"`);
+        } catch {
+          return matched[1].replace(/\\"/g, '"').replace(/\\n/g, "\n");
+        }
+      }
+    }
+  }
+
+  // 剥离两端可能残留的代码块符号
+  clean = clean.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  return clean;
+}
+
+function renderLayerBody(rawText: string | undefined, fieldKey: string, emptyFallback: string) {
+  const text = cleanLayerText(rawText, fieldKey);
+  if (!text) return <p className="coach-empty-text">{emptyFallback}</p>;
+
+  const paragraphs = text
+    .split(/\n+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  if (paragraphs.length <= 1) {
+    return <p>{text}</p>;
+  }
+
+  return (
+    <div className="coach-paragraphs">
+      {paragraphs.map((p, idx) => (
+        <p key={idx}>{p}</p>
+      ))}
+    </div>
+  );
+}
+
 export default function ReplayWorkbench() {
   const [days, setDays] = useState<string[]>([]);
   const [provider, setProvider] = useState<Provider>("synthetic");
@@ -778,14 +833,63 @@ export default function ReplayWorkbench() {
             ) : coachReview ? (
               <>
                 <div className="coach-layer-grid">
-                  <article className="coach-layer source"><span className="coach-layer-index">01</span><div><h4>原书依据</h4><p>{coachReview.source_grounded || "暂无可引用的原书依据。"}</p></div></article>
-                  <article className="coach-layer mechanical"><span className="coach-layer-index">02</span><div><h4>系统机械近似</h4><p>{coachReview.mechanical_approx || "暂无机械近似说明。"}</p></div></article>
-                  <article className="coach-layer interpretation"><span className="coach-layer-index">03</span><div><h4>教练解释</h4><p>{coachReview.coach_interpretation || "暂无教练解释。"}</p></div></article>
+                  <article className="coach-layer source">
+                    <span className="coach-layer-index">01</span>
+                    <div>
+                      <h4>原书依据</h4>
+                      {renderLayerBody(coachReview.source_grounded, "source_grounded", "暂无可引用的原书依据。")}
+                    </div>
+                  </article>
+                  <article className="coach-layer mechanical">
+                    <span className="coach-layer-index">02</span>
+                    <div>
+                      <h4>系统机械近似</h4>
+                      {renderLayerBody(coachReview.mechanical_approx, "mechanical_approx", "暂无机械近似说明。")}
+                    </div>
+                  </article>
+                  <article className="coach-layer interpretation">
+                    <span className="coach-layer-index">03</span>
+                    <div>
+                      <h4>教练解释</h4>
+                      {renderLayerBody(coachReview.coach_interpretation, "coach_interpretation", "暂无教练解释。")}
+                    </div>
+                  </article>
                 </div>
                 <div className="coach-references">
-                  <div className="coach-section-label">引用页码 / 来源 <span className={`pill ${coachReview.references.length ? "blue" : "ghost"}`}>{coachReview.references.length} 条</span></div>
-                  {coachReview.references.length ? <div className="reference-list">{coachReview.references.map((ref, i) => <div className="reference-item" key={`${ref.chunk_id ?? "ref"}-${i}`}><span className="reference-mark">{String(i + 1).padStart(2, "0")}</span><span><b>{ref.book ?? "知识库来源"}</b><small>{ref.pdf_page ? `PDF p.${ref.pdf_page}` : "页码未标注"}{ref.print_page ? ` · 印刷页 ${ref.print_page}` : ""} · {ref.source_file ?? ref.source_type ?? "本地知识库"}</small></span></div>)}</div> : <p className="hint">暂无可核验来源。请将此结果视为不充分证据。</p>}
-                  {coachReview.insufficient_evidence && <div className="evidence-warning">依据不足：AI 已明确标记 insufficient_evidence，请勿将本次对照视为确定结论。</div>}
+                  <div className="coach-section-label">
+                    引用页码 / 来源 <span className={`pill ${coachReview.references.length ? "blue" : "ghost"}`}>{coachReview.references.length} 条</span>
+                  </div>
+                  {coachReview.references.length ? (
+                    <div className="reference-list">
+                      {coachReview.references.map((ref, i) => (
+                        <div className="reference-item" key={`${ref.chunk_id ?? "ref"}-${i}`}>
+                          <span className="reference-mark">{String(i + 1).padStart(2, "0")}</span>
+                          <div className="reference-content">
+                            <div className="reference-header">
+                              <b>{ref.book ?? "知识库来源"}</b>
+                              <small>
+                                {ref.pdf_page ? `PDF p.${ref.pdf_page}` : "页码未标注"}
+                                {ref.print_page ? ` · 印刷页 ${ref.print_page}` : ""}
+                                {ref.source_file
+                                  ? ` · ${ref.source_file.split(/[\\/]/).pop()}`
+                                  : ref.source_type
+                                  ? ` · ${ref.source_type}`
+                                  : ""}
+                              </small>
+                            </div>
+                            {ref.content && <p className="reference-quote">{ref.content}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="hint">暂无可核验来源。请将此结果视为不充分证据。</p>
+                  )}
+                  {coachReview.insufficient_evidence && (
+                    <div className="evidence-warning">
+                      依据不足：AI 已明确标记 insufficient_evidence，请勿将本次对照视为确定结论。
+                    </div>
+                  )}
                 </div>
                 <div className="coach-extension">
                   <div className="coach-section-label">历史相似走势 <span className="pill blue">TOP {analogMatches.length}</span></div>

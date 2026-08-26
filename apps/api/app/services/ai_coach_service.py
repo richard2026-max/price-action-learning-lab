@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
@@ -162,52 +163,176 @@ class AICoachService:
     @staticmethod
     def decision_review_prompt(context: dict[str, Any], references: str = "") -> str:
         return (
-            "执行判断复盘。以下 JSON 只包含提交判断时已经可见的信息；严禁推断或引用之后的行情、交易结果或未来数据。\n"
-            "请严格输出 JSON 对象，字段必须为 source_grounded、mechanical_approx、"
-            "coach_interpretation、references、insufficient_evidence。"
-            "前三个字段为字符串，references 为数组，insufficient_evidence 为布尔值。\n"
-            f"判断上下文：{json.dumps(context, ensure_ascii=False, separators=(',', ':'))}\n"
-            f"知识库片段：{references}"
+            "请作为专业价格行为学教练，对该时点的学员决策进行深度对照复盘。\n"
+            "【强制输出约束】：\n"
+            "1. 必须全程使用中文回答。\n"
+            "2. 只能基于当时可见行情与事实，严禁推断或引用之后的行情、未来数据或后验交易盈亏。\n"
+            "3. 必须直接输出合法标准 JSON 对象，严禁使用 ```json 或 ``` 代码块包裹，首字符必须是 {，末字符必须是 }。\n"
+            "4. JSON 对象必须且只能包含以下 5 个字段：\n"
+            "   - \"source_grounded\": 纯文本字符串。对照原书/课件理论依据（严禁包含未解析 JSON 或代码块）。\n"
+            "   - \"mechanical_approx\": 纯文本字符串。系统客观形态识别器与关键价位/指标状态分析。\n"
+            "   - \"coach_interpretation\": 纯文本字符串。针对学员方向、理由、止损与目标的教练诊断与思维纠偏。\n"
+            '   - "references": 数组。每项为 {"book": "T/R/REV/COURSE", '
+            '"pdf_page": 数字页码, "content": "要点摘要"}。\n'
+            '   - "insufficient_evidence": 布尔值（true 或 false）。\n\n'
+            f"判断时点可见上下文：{json.dumps(context, ensure_ascii=False, separators=(',', ':'))}\n"
+            f"知识库检索片段：{references}"
         )
 
     @staticmethod
     def _system_prompt() -> str:
-        return "你是 Al Brooks 价格行为学习教练。只教练，不做最终交易决定；不编造页码或原意。"
+        return (
+            "你是 Al Brooks 价格行为学习教练。严格使用专业中文术语，只教练不带单，"
+            "不做最终交易决定；不编造页码或原意。"
+        )
 
     @staticmethod
     def _review_rules() -> str:
-        return "来源必须分成：原书依据、系统机械近似、教练解释；依据不足时明确标记 insufficient_evidence。"
+        return "必须清晰区分三层：原书依据、系统机械近似、教练解释；依据不足时明确标记 insufficient_evidence 为 true。"
 
     @staticmethod
     def _answer_from_text(text: str, refs: list[Any]) -> CoachAnswer:
-        """解析纯 JSON、```json``` 代码块及带前后说明的 JSON。"""
-        candidate = text.strip()
-        if "```" in candidate:
-            blocks = candidate.split("```")
-            candidate = next((block.strip() for block in blocks if block.strip().startswith("{")), candidate)
-        if not candidate.startswith("{") and "{" in candidate and "}" in candidate:
-            candidate = candidate[candidate.find("{") : candidate.rfind("}") + 1]
+        """多重容错解析：剥除代码块、正则容错提取核心字段、支持自然语言分段与引用结构化转换。"""
+        clean = text.strip()
+        # 1. 剥离可能存在的 ```json ... ``` 标记
+        fence_match = re.search(r"```(?:json|JSON)?\s*([\s\S]*?)\s*```", clean)
+        if fence_match:
+            clean = fence_match.group(1).strip()
+        if not clean.startswith("{") and "{" in clean and "}" in clean:
+            first_b = clean.find("{")
+            last_b = clean.rfind("}")
+            if first_b < last_b:
+                clean = clean[first_b : last_b + 1].strip()
+
+        obj: dict[str, Any] | None = None
         try:
-            obj = json.loads(candidate)
-            model_refs = obj.get("references")
-            valid_model_refs = isinstance(model_refs, list) and all(
-                isinstance(item, dict) for item in model_refs
-            )
-            references = model_refs if valid_model_refs else [r.to_ref() for r in refs]
-            flag = obj.get("insufficient_evidence", False)
-            insufficient = flag if isinstance(flag, bool) else str(flag).lower() == "true"
-            return CoachAnswer(
-                str(obj.get("source_grounded", "")),
-                str(obj.get("mechanical_approx", "")),
-                str(obj.get("coach_interpretation", "")),
-                references,
-                insufficient,
-            )
+            parsed = json.loads(clean)
+            if isinstance(parsed, dict):
+                obj = parsed
         except (ValueError, TypeError):
-            parts = text.split("---")
+            obj = None
+
+        # 2. 正则兜底提取字段（应对未转义双引号、换行符导致的语法解析错误）
+        if obj is None:
+            obj = AICoachService._regex_extract_fields(text)
+
+        # 3. 若成功提取到核心字段
+        if obj and any(k in obj for k in ("source_grounded", "mechanical_approx", "coach_interpretation")):
+            sg = AICoachService._strip_field_wrapper(str(obj.get("source_grounded", "")), "source_grounded")
+            ma = AICoachService._strip_field_wrapper(str(obj.get("mechanical_approx", "")), "mechanical_approx")
+            ci = AICoachService._strip_field_wrapper(str(obj.get("coach_interpretation", "")), "coach_interpretation")
+
+            references = AICoachService._parse_references(obj.get("references"), refs)
+            flag = obj.get("insufficient_evidence", False)
+            insufficient = flag if isinstance(flag, bool) else str(flag).lower() in ("true", "1", "yes")
+
+            return CoachAnswer(
+                source_grounded=sg,
+                mechanical_approx=ma,
+                coach_interpretation=ci,
+                references=references,
+                insufficient_evidence=insufficient,
+            )
+
+        # 4. 自然语言标志分段兜底（如模型输出【原书依据】...【系统机械近似】...）
+        return AICoachService._parse_section_fallback(text, refs)
+
+    @staticmethod
+    def _strip_field_wrapper(val: str, field_key: str) -> str:
+        """剥离字段内意外包含的外层 JSON 或代码块。"""
+        s = val.strip()
+        if "```" in s:
+            m = re.search(r"```(?:json|JSON)?\s*([\s\S]*?)\s*```", s)
+            if m:
+                s = m.group(1).strip()
+        if s.startswith("{") and f'"{field_key}"' in s:
+            try:
+                inner = json.loads(s)
+                if isinstance(inner, dict) and field_key in inner:
+                    return str(inner[field_key]).strip()
+            except Exception:
+                pass
+        return s
+
+    @staticmethod
+    def _regex_extract_fields(raw: str) -> dict[str, Any]:
+        """正则容错抽取 JSON 核心字段。"""
+        fields: dict[str, Any] = {}
+        for key in ("source_grounded", "mechanical_approx", "coach_interpretation"):
+            m = re.search(rf'"{key}"\s*:\s*"((?:[^"\\]|\\.)*)"', raw, re.DOTALL)
+            if m:
+                val = m.group(1)
+                try:
+                    fields[key] = json.loads(f'"{val}"')
+                except Exception:
+                    fields[key] = val.replace('\\"', '"').replace("\\n", "\n")
+        m_ie = re.search(r'"insufficient_evidence"\s*:\s*(true|false|"[^"]*")', raw, re.IGNORECASE)
+        if m_ie:
+            fields["insufficient_evidence"] = "true" in m_ie.group(1).lower()
+        return fields
+
+    @staticmethod
+    def _parse_references(model_refs: Any, default_refs: list[Any]) -> list[dict[str, Any]]:
+        """将模型返回的字符串或字典列表统一解析为结构化引用。"""
+        out: list[dict[str, Any]] = []
+        if isinstance(model_refs, list):
+            for item in model_refs:
+                if isinstance(item, dict):
+                    page_val = item.get("pdf_page", 0)
+                    page_num = int(page_val) if str(page_val).isdigit() else 0
+                    out.append({
+                        "book": str(item.get("book", "参考资料")),
+                        "pdf_page": page_num,
+                        "print_page": item.get("print_page"),
+                        "source_file": str(item.get("source_file", "")),
+                        "source_type": str(item.get("source_type", "book_pdf")),
+                        "content": str(item.get("content") or item.get("quote") or ""),
+                    })
+                elif isinstance(item, str) and item.strip():
+                    m = re.search(r"(?:\[)?([A-Za-z0-9_]+)\s+PDF\s+p\.?(\d+)(?:\])?(?:\s*[:：]\s*(.*))?", item)
+                    if m:
+                        code = m.group(1).upper()
+                        page = int(m.group(2))
+                        desc = (m.group(3) or item).strip()
+                        out.append({
+                            "book": code,
+                            "pdf_page": page,
+                            "print_page": None,
+                            "source_type": "book_pdf" if code in ("T", "R", "REV", "BOOK") else "courseware",
+                            "source_file": "",
+                            "content": desc,
+                        })
+        if not out and default_refs:
+            return [r.to_ref() for r in default_refs]
+        return out
+
+    @staticmethod
+    def _parse_section_fallback(text: str, refs: list[Any]) -> CoachAnswer:
+        """处理自然语言或标志符分段。"""
+        clean = text.strip()
+        if "---" in clean:
+            parts = clean.split("---")
             return CoachAnswer(
                 parts[0].strip(),
                 parts[1].strip() if len(parts) > 1 else "",
-                parts[2].strip() if len(parts) > 2 else text,
+                parts[2].strip() if len(parts) > 2 else clean,
                 [r.to_ref() for r in refs],
             )
+        p1 = re.search(r"【(?:原书依据|理论依据)】|原书依据\s*[:：]", clean)
+        p2 = re.search(r"【(?:系统机械近似|机械近似)】|机械近似\s*[:：]", clean)
+        p3 = re.search(r"【(?:教练解释|学员诊断)】|教练解释\s*[:：]", clean)
+        if p1 and p2 and p3:
+            s1 = clean[p1.end() : p2.start()].strip()
+            s2 = clean[p2.end() : p3.start()].strip()
+            s3 = clean[p3.end() :].strip()
+            return CoachAnswer(s1, s2, s3, [r.to_ref() for r in refs])
+
+        # 终极兜底：剥除任何反引号代码块，绝不输出 raw json 格式
+        clean = re.sub(r"```(?:json|JSON)?", "", clean).replace("```", "").strip()
+        return CoachAnswer(
+            clean,
+            "未检测到独立机械近似分段。",
+            "已合并至依据区。",
+            [r.to_ref() for r in refs],
+        )
+

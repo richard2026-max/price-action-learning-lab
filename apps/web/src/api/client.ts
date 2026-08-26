@@ -207,6 +207,7 @@ export interface CoachReference {
   chunk_hash?: string;
   source_type?: string;
   source_file?: string;
+  content?: string;
 }
 
 export interface CoachReview {

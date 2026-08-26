@@ -189,6 +189,59 @@ export const submitJudgment = (id: string, provider: Provider, payload: Judgment
 export const listJudgments = (id: string, provider: Provider) =>
   fetch(`${BASE}/replay/sessions/${id}/judgments?${q(provider)}`).then((r) => j<Judgment[]>(r));
 
+// ---------- AI 对照复盘 ----------
+
+export interface CoachConfig {
+  enabled: boolean;
+  configured: boolean;
+  provider: string;
+  model: string;
+  temperature: number;
+}
+
+export interface CoachReference {
+  book?: string;
+  pdf_page?: number;
+  print_page?: string | null;
+  chunk_id?: string;
+  chunk_hash?: string;
+  source_type?: string;
+  source_file?: string;
+}
+
+export interface CoachReview {
+  source_grounded: string;
+  mechanical_approx: string;
+  coach_interpretation: string;
+  references: CoachReference[];
+  insufficient_evidence: boolean;
+}
+
+export const getCoachConfig = () =>
+  fetch(`${BASE}/coach/config`).then((r) => j<CoachConfig>(r));
+
+export const reviewJudgmentWithCoach = (sessionId: string, judgmentId: number) =>
+  fetch(`${BASE}/coach/sessions/${sessionId}/judgments/${judgmentId}/review`, {
+    method: "POST",
+  }).then((r) => j<CoachReview>(r));
+
+export interface AnalogMatch {
+  date: string;
+  start_time: string;
+  end_time: string;
+  similarity: number;
+  distance: number;
+  pattern_label: string;
+  forward_direction: string;
+  forward_result: string;
+  forward_return: number | null;
+}
+
+export const searchJudgmentAnalogs = (sessionId: string, judgmentId: number) =>
+  fetch(`${BASE}/coach/sessions/${sessionId}/judgments/${judgmentId}/analogs`).then((r) =>
+    j<{ session_id: string; judgment_id: number; matches: AnalogMatch[] }>(r),
+  );
+
 export const addAnnotation = (id: string, provider: Provider, barIndex: number, kind: "label" | "note", label: string | null, text: string | null) =>
   fetch(`${BASE}/replay/sessions/${id}/annotations?${q(provider)}`, {
     method: "POST",

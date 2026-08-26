@@ -27,8 +27,12 @@ from app.replay.service import ReplayService
 from app.repositories.replay_repo import ReplayRepository
 from app.repositories.scanner_repo import ScannerRepository
 from app.repositories.sim_trade_repo import SimTradeRepository
+from app.services.ai_coach_service import AICoachService
+from app.services.analog_search_service import AnalogSearchService
 from app.services.analytics_service import AnalyticsService
 from app.services.calendar import default_calendar
+from app.services.decision_review_service import DecisionContextExtractor
+from app.services.knowledge_service import KnowledgeService
 from app.services.market_data import MarketDataStore
 from app.services.scanner_service import ScannerService
 from app.services.sim_trade_service import SimTradeService
@@ -72,6 +76,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         store=app.state.store, calendar=default_calendar(), repo=ScannerRepository(factory)
     )
     app.state.analytics_service = AnalyticsService(factory=factory)
+    app.state.analog_search_service = AnalogSearchService(store=app.state.store)
+    app.state.knowledge_service = KnowledgeService(settings)
+    app.state.ai_coach_service = AICoachService(app.state.knowledge_service, settings=settings)
+    app.state.decision_context_extractor = DecisionContextExtractor(
+        replay_service=app.state.replay_service,
+        trade_repo=app.state.sim_trade_service._repo,
+    )
 
     app.include_router(health.router, prefix="/api/v1")
     app.include_router(data.router, prefix="/api/v1")

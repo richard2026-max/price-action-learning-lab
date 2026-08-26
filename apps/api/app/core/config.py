@@ -41,8 +41,20 @@ class Settings(BaseSettings):
     hfdl_api_key: str | None = None
     hfdl_base_url: str = "https://api.hfdatalibrary.com/v1"
 
-    # AI 默认禁用（Product 边界：AI 关闭时核心功能正常）
+    # ---- 学习资料目录（原书 + 中文课件，提前解析并本地增量索引）----
+    # 原书目录（默认 AlBrooks书）
+    books_dir: Path = REPO_ROOT.parent / "AlBrooks书"
+    # 中文课件目录（默认 AlBrooks课件）
+    courseware_dir: Path = REPO_ROOT.parent / "AlBrooks课件"
+    # 知识库增量缓存索引文件
+    knowledge_cache_path: Path = REPO_ROOT / "data" / "cache" / "knowledge_index.json"
+
+    # ---- AI 教练（DeepSeek 优先；默认禁用）----
     ai_enabled: bool = False
+    ai_base_url: str = "https://api.deepseek.com/v1"
+    ai_api_key: str | None = None
+    ai_model: str = "deepseek-chat"
+    ai_temperature: float = 0.2
 
 
 def get_settings() -> Settings:

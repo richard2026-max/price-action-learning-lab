@@ -199,3 +199,16 @@ Batch 8: 补齐审计遗漏交付物 + 残留一致性修正（2026-08-16，独�
   1. 回放支持加载前N日走势背景（context_days）：后端 _load 与 _detail 支持加载前 1~10 交易日的 RTH 5m 作为前置历史背景走势；EMA20 跨日连续平滑计算；前端增加「预热天数」配置项（默认 2 天），彻底解决“开盘只有单日几根K线看不到大趋势”的问题。
   2. 视觉尺寸放大：K 线主图表高度从 540px 放大至 680px；笔记标注弹窗从 440px 扩展至 640px 且支持 6 行输入（解决图3太小、看不清走势的痛点）。
   3. 验证：75 项测试全绿；Ruff 0 违规；Mypy 0 错误；前端打包通过。
+
+- Batch 25 完成（知识库增量热更新与课件解析，2026-08-26）：
+  1. 新增原书 PDF、课件 PDF/MD/TXT 的统一本地索引；使用 pypdf 逐页提取文本，来源记录 source_type/source_file/pdf_page。
+  2. 增量缓存采用 mtime + BLAKE2b 内容哈希，新增/修改/删除文件自动更新；缓存位于 data/cache/knowledge_index.json 且已加入 .gitignore。
+  3. 真实课件两份 PDF 已验证具备文本层，共 4,216 个课件切片；首次完整解析约 630 秒，缓存重载约 0.81 秒。
+  4. 验证：85 项后端测试全绿；Ruff 0 违规；Mypy 0 错误。
+
+- Batch 26 完成（无前视 AI 决策复盘、DeepSeek 配置、相似走势检索，2026-08-26）：
+  1. DecisionContextExtractor 严格以 JudgmentORM.bar_index 裁剪可见 K 线、EMA、关键价位和 detector candidates，不使用会话后续 cursor 或未来行情。
+  2. AI Coach 支持 DeepSeek OpenAI 兼容接口、温度配置、无 key 安全降级；新增单点复盘、整场 summary-review 与配置 API。
+  3. AnalogSearchService 支持 SPY 5m 归一化窗口、欧氏距离、重叠排除、Top-K 与后续 10 根结果；当前为可注入服务，未伪造课件图像相似度。
+  4. 前端回放判断卡片增加 AI 对照复盘侧栏，展示原始判断、三层回答、引用和未配置状态，AI 不覆盖原始判断。
+  5. 验证：85 项后端测试全绿；Ruff 0 违规；Mypy 0 错误；npm run build 通过。

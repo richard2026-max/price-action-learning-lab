@@ -18,7 +18,13 @@ import {
   manualExitTrade,
   randomDay,
   submitJudgment,
+  getCoachConfig,
+  reviewJudgmentWithCoach,
+  searchJudgmentAnalogs,
+  type AnalogMatch,
   type Candidate,
+  type CoachConfig,
+  type CoachReview,
   type Judgment,
   type JudgmentPayload,
   type Provider,
@@ -90,6 +96,13 @@ export default function ReplayWorkbench() {
   const [tradeNotes, setTradeNotes] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
   const [noteText, setNoteText] = useState("");
+  const [coachOpen, setCoachOpen] = useState(false);
+  const [coachLoading, setCoachLoading] = useState(false);
+  const [coachConfig, setCoachConfig] = useState<CoachConfig | null>(null);
+  const [coachReview, setCoachReview] = useState<CoachReview | null>(null);
+  const [analogMatches, setAnalogMatches] = useState<AnalogMatch[]>([]);
+  const [coachJudgment, setCoachJudgment] = useState<Judgment | null>(null);
+  const [coachError, setCoachError] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [showMarkers, setShowMarkers] = useState(true);
@@ -223,6 +236,36 @@ export default function ReplayWorkbench() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [detail, doAdvance, doBack, judgmentOpen, tradeFormOpen]);
+
+  const openCoachReview = async (judgment: Judgment) => {
+    if (!detail) return;
+    setCoachJudgment(judgment);
+    setCoachReview(null);
+    setAnalogMatches([]);
+    setCoachError("");
+    setCoachOpen(true);
+    setCoachLoading(true);
+    try {
+      const config = await getCoachConfig();
+      setCoachConfig(config);
+      const analogPromise = searchJudgmentAnalogs(detail.session_id, judgment.id)
+        .then((result) => setAnalogMatches(result.matches))
+        .catch(() => setAnalogMatches([]));
+      if (!config.configured || !config.enabled) {
+        await analogPromise;
+        return;
+      }
+      const [review] = await Promise.all([
+        reviewJudgmentWithCoach(detail.session_id, judgment.id),
+        analogPromise,
+      ]);
+      setCoachReview(review);
+    } catch (e) {
+      setCoachError(String(e));
+    } finally {
+      setCoachLoading(false);
+    }
+  };
 
   const onSubmitJudgment = async (p: JudgmentPayload) => {
     if (!detail) return;
@@ -624,6 +667,12 @@ export default function ReplayWorkbench() {
                   {j.payload.reasons.length > 0 && (
                     <div className="jitem-reasons">理由：{j.payload.reasons.join("；")}</div>
                   )}
+                  <div className="jitem-footer">
+                    <span className="hint">已保留原始判断</span>
+                    <button className="small coach-button" onClick={() => openCoachReview(j)}>
+                      ✦ AI 对照复盘
+                    </button>
+                  </div>
                 </div>
               ))
             )}
@@ -690,6 +739,62 @@ export default function ReplayWorkbench() {
           onSubmit={onSubmitJudgment}
           onCancel={() => setJudgmentOpen(false)}
         />
+      )}
+
+      {coachOpen && coachJudgment && (
+        <div className="modal-mask coach-mask" onClick={() => setCoachOpen(false)}>
+          <section className="coach-drawer" onClick={(e) => e.stopPropagation()} aria-labelledby="coach-title">
+            <div className="coach-header">
+              <div>
+                <div className="eyebrow">DECISION REVIEW · #{coachJudgment.bar_index + 1}</div>
+                <h3 id="coach-title">AI 对照复盘</h3>
+                <p className="hint">只对照提交当刻可见信息，不改写、不覆盖你的原始判断。</p>
+              </div>
+              <button className="ghost small" onClick={() => setCoachOpen(false)} aria-label="关闭复盘面板">✕</button>
+            </div>
+
+            <div className="coach-original">
+              <div className="coach-section-label">我的判断 <span className="pill primary">ORIGINAL</span></div>
+              <div className="coach-original-grid">
+                <span>背景：<b>{CONTEXT_ZH[coachJudgment.payload.context_label] ?? coachJudgment.payload.context_label}</b></span>
+                <span>方向：<b>{coachJudgment.payload.direction === "long" ? "做多" : coachJudgment.payload.direction === "short" ? "做空" : "不交易"}</b></span>
+                <span>信心：<b>{coachJudgment.payload.confidence || "—"}</b></span>
+                <span>概率：<b>{coachJudgment.payload.probability_estimate || "—"}</b></span>
+              </div>
+              {coachJudgment.payload.structure_note && <p>{coachJudgment.payload.structure_note}</p>}
+              {coachJudgment.payload.reasons.length > 0 && <p className="coach-reasons">理由：{coachJudgment.payload.reasons.join("；")}</p>}
+            </div>
+
+            {coachLoading ? (
+              <div className="coach-loading"><span className="coach-spinner" /> 正在检索来源并生成对照…</div>
+            ) : coachError ? (
+              <div className="coach-state coach-state-error"><b>复盘暂时不可用</b><span>{coachError}</span></div>
+            ) : coachConfig && (!coachConfig.configured || !coachConfig.enabled) ? (
+              <div className="coach-state coach-state-muted">
+                <div className="coach-state-icon">AI</div>
+                <div><b>AI 教练尚未配置</b><p>当前仅保留你的判断，不会伪造 AI 结论或相似走势数据。配置 {coachConfig.provider} API Key 后即可生成三层对照复盘。</p></div>
+                <span className="pill ghost">未配置</span>
+              </div>
+            ) : coachReview ? (
+              <>
+                <div className="coach-layer-grid">
+                  <article className="coach-layer source"><span className="coach-layer-index">01</span><div><h4>原书依据</h4><p>{coachReview.source_grounded || "暂无可引用的原书依据。"}</p></div></article>
+                  <article className="coach-layer mechanical"><span className="coach-layer-index">02</span><div><h4>系统机械近似</h4><p>{coachReview.mechanical_approx || "暂无机械近似说明。"}</p></div></article>
+                  <article className="coach-layer interpretation"><span className="coach-layer-index">03</span><div><h4>教练解释</h4><p>{coachReview.coach_interpretation || "暂无教练解释。"}</p></div></article>
+                </div>
+                <div className="coach-references">
+                  <div className="coach-section-label">引用页码 / 来源 <span className={`pill ${coachReview.references.length ? "blue" : "ghost"}`}>{coachReview.references.length} 条</span></div>
+                  {coachReview.references.length ? <div className="reference-list">{coachReview.references.map((ref, i) => <div className="reference-item" key={`${ref.chunk_id ?? "ref"}-${i}`}><span className="reference-mark">{String(i + 1).padStart(2, "0")}</span><span><b>{ref.book ?? "知识库来源"}</b><small>{ref.pdf_page ? `PDF p.${ref.pdf_page}` : "页码未标注"}{ref.print_page ? ` · 印刷页 ${ref.print_page}` : ""} · {ref.source_file ?? ref.source_type ?? "本地知识库"}</small></span></div>)}</div> : <p className="hint">暂无可核验来源。请将此结果视为不充分证据。</p>}
+                  {coachReview.insufficient_evidence && <div className="evidence-warning">依据不足：AI 已明确标记 insufficient_evidence，请勿将本次对照视为确定结论。</div>}
+                </div>
+                <div className="coach-extension">
+                  <div className="coach-section-label">历史相似走势 <span className="pill blue">TOP {analogMatches.length}</span></div>
+                  {analogMatches.length ? <div className="analog-list">{analogMatches.map((match) => <div className="analog-item" key={`${match.start_time}-${match.distance}`}><span><b>{match.date}</b><small>{new Date(match.start_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} — {new Date(match.end_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {match.pattern_label}</small></span><span className="analog-result"><b>{match.forward_direction.toUpperCase()}</b><small>{(match.similarity * 100).toFixed(1)}% 相似</small></span></div>)}</div> : <small>暂无可用历史片段；系统不会展示伪造相似走势。</small>}
+                </div>
+              </>
+            ) : null}
+          </section>
+        </div>
       )}
 
       {noteOpen && (

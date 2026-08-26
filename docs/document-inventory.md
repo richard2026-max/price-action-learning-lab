@@ -5,7 +5,7 @@
 > 状态取值仅允许：`active` / `needs_update` / `deprecated` / `historical` / `unknown`。
 
 ```yaml
-inventory_version: 1.2.0
+inventory_version: 1.3.0
 generated_at: 2026-08-16
 canonical_documents:
   - docs/product/PRD.md
@@ -36,6 +36,7 @@ canonical_documents:
 | `docs/architecture/adr-and-risks.md` | ADR 决策记录（ADR-001~008）与风险清单 | active | 否 | 否 | 持续维护 |
 | `docs/architecture/prior-art-survey.md` | 既有方案调研与选型决策（无可 fork 整体方案；组件级复用清单） | active | 否 | 否 | ADR 性质 |
 | `docs/architecture/project-structure-and-roadmap.md` | 仓库目录结构与 MVP 路线图 | active | 否 | 否 | 持续维护 |
+| `docs/user-guide/getting-started.md` | 本地启动、回放训练与 AI 对照复盘使用说明 | active | 否 | 持续维护 | 已增加 AI 教练配置与知识库说明 |
 | `docs/concepts/README.md` | Concept Spec 强制流程与模板（已登记全部 14 项 detector） | active | 否 | 持续维护 | Level 1-5 全规格就绪 |
 | `docs/concepts/*.md` (共11份文件) | 各 detector 概念规格（bar-anatomy, doji, trend-bar, inside-bar, outside-bar, ii-iii-ioi, signal-bar-evidence, swing, pullback-leg, hl-counting, trend-lines, wedge, climax, micro-channel） | active | 否 | 否 | 全部先规格后实现 |
 | `docs/architecture/assumptions.md` | （历史）初版需求理解与默认值 | **deprecated** | 否 | — | 已废弃，仅作历史追溯 |

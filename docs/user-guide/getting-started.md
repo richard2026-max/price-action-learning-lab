@@ -48,6 +48,13 @@
 - **系统候选**：提交判断后解锁显示 19 类形态识别器输出
 - **模拟持仓**：实时 MFE/MAE 与 R 倍数
 - **已锁定判断**：当日全部判断历史
+- **AI 对照复盘**：对已提交判断打开侧栏，查看原始判断、客观事实、原书/课件依据与教练诊断；不会改写原始判断
+
+### AI 教练与课件知识库
+1. 将原书 PDF/笔记放在仓库外的 `AlBrooks书`，将中文课件 PDF/MD/TXT 放在 `AlBrooks课件`。
+2. 复制 `.env.example` 为 `.env`，按需设置 `PALL_AI_ENABLED=true`、`PALL_AI_API_KEY=...`；默认使用 DeepSeek `https://api.deepseek.com/v1` 与 `deepseek-chat`。
+3. 首次调用会逐页解析并写入 `data/cache/knowledge_index.json`，之后按 mtime + 内容哈希增量更新；新增、修改或删除文件会自动同步。
+4. API Key 只放本地 `.env`，不要提交 Git。未配置 AI 时，系统仍可展示知识库引用并明确提示未配置，不会调用远程模型。
 
 ---
 

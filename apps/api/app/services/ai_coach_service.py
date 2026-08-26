@@ -1,18 +1,13 @@
-"""AI Coach 服务（provider-neutral 抽象，禁用模式可运行）。
-
-约束（PRD §七、brooks-system-design-implications §六）：
-- AI 是教练非决策者，不做最终交易判断
-- 回答必须区分三类来源：书中定义 / 系统机械近似 / AI 解释
-- 无原书依据时明确回答"当前知识库没有足够依据"
-- 不泄露未来行情，prompt 不含 cursor 之后数据
-- 默认禁用（Settings.ai_enabled=False），禁用时核心功能正常
-"""
+"""AI 教练服务：知识库 grounding、判断复盘和安全降级。"""
 
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from typing import Any
 
+from app.core.config import Settings
 from app.services.knowledge_service import KnowledgeService
 
 
@@ -26,8 +21,6 @@ class CoachAnswer:
 
 
 class LLMProvider(ABC):
-    """LLM 提供方抽象接口。"""
-
     @abstractmethod
     def generate(self, system_prompt: str, user_prompt: str) -> str: ...
 
@@ -38,10 +31,11 @@ class DisabledLLMProvider(LLMProvider):
 
 
 class OpenAICompatProvider(LLMProvider):
-    def __init__(self, base_url: str, api_key: str, model: str) -> None:
+    def __init__(self, base_url: str, api_key: str, model: str, ai_temperature: float = 0.2) -> None:
         self._base_url = base_url.rstrip("/")
         self._key = api_key
         self._model = model
+        self._temperature = ai_temperature
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
         import httpx
@@ -51,11 +45,8 @@ class OpenAICompatProvider(LLMProvider):
             headers={"Authorization": f"Bearer {self._key}"},
             json={
                 "model": self._model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "temperature": 0.3,
+                "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+                "temperature": self._temperature,
             },
             timeout=60,
         )
@@ -65,58 +56,144 @@ class OpenAICompatProvider(LLMProvider):
 
 
 class AICoachService:
-    """AI 教练服务：结合知识库检索与 LLM 生成结构化回答。"""
-
     def __init__(
         self,
         knowledge_svc: KnowledgeService,
         llm_provider: LLMProvider | None = None,
+        settings: Settings | None = None,
     ) -> None:
         self._knowledge = knowledge_svc
-        self._llm = llm_provider
+        self._settings = settings or Settings()
+        self._injected_provider = llm_provider is not None
+        self._llm: LLMProvider | None = None
+        # An injected provider is intentionally useful for tests/local adapters. Remote
+        # DeepSeek is constructed only when both the feature flag and key are present.
+        if llm_provider is not None:
+            self._llm = llm_provider
+        elif self._settings.ai_enabled and self._settings.ai_api_key:
+            self._llm = OpenAICompatProvider(
+                self._settings.ai_base_url,
+                self._settings.ai_api_key,
+                self._settings.ai_model,
+                self._settings.ai_temperature,
+            )
+        else:
+            self._llm = None
 
     @property
     def enabled(self) -> bool:
-        return self._llm is not None
+        return self._injected_provider or (
+            self._llm is not None and self._settings.ai_enabled and bool(self._settings.ai_api_key)
+        )
+
+    def config(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "configured": bool(self._settings.ai_api_key),
+            "provider": "deepseek"
+            if self._settings.ai_base_url.startswith("https://api.deepseek.com")
+            else "openai-compatible",
+            "model": self._settings.ai_model,
+            "temperature": self._settings.ai_temperature,
+        }
 
     def ask_concept(self, concept_term: str, question: str = "") -> CoachAnswer:
         refs = self._knowledge.search_by_concept(concept_term, max_results=5)
-
         if not refs:
+            return CoachAnswer("", "", "", [], True)
+        if not self._llm or not self.enabled:
+            snippets = "\n---\n".join(f"[{r.book_code} PDF p{r.pdf_page}]\n{r.content[:300]}" for r in refs[:3])
             return CoachAnswer(
-                source_grounded="",
-                mechanical_approx="",
-                coach_interpretation="",
-                references=[],
-                insufficient_evidence=True,
+                f"知识库检索到 {len(refs)} 条相关内容：\n{snippets}",
+                "AI 禁用模式下不生成机械近似说明。",
+                "AI 禁用模式下不生成教练解释。",
+                [r.to_ref() for r in refs],
             )
-
-        if not self._llm:
-            snippets = "\n---\n".join(
-                f"[{r.book_code} PDF p{r.pdf_page}]\n{r.content[:300]}" for r in refs[:3]
-            )
-            return CoachAnswer(
-                source_grounded=f"知识库检索到 {len(refs)} 条相关内容：\n{snippets}",
-                mechanical_approx="AI 禁用模式下不生成机械近似说明。",
-                coach_interpretation="AI 禁用模式下不生成教练解释。",
-                references=[r.to_ref() for r in refs],
-            )
-
         ref_texts = "\n".join(f"[{r.book_code} PDF p{r.pdf_page}] {r.content[:500]}" for r in refs[:3])
-        system_prompt = (
-            "你是 Al Brooks 价格行为学的学习教练。严格遵循以下规则：\n"
-            "1. 仅基于提供的原书片段回答，不编造页码或原意\n"
-            "2. 区分三类内容：书中定义 / 系统机械近似 / 你的解释\n"
-            "3. 不提供买卖建议，不做最终交易判断\n"
-            "4. 依据不足时明确说'知识库没有足够依据'\n"
+        response = self._llm.generate(
+            self._system_prompt(), f"概念：{concept_term}\n{question}\n\n原书片段：\n{ref_texts}"
         )
-        user_prompt = f"概念：{concept_term}\n{question}\n\n原书片段：\n{ref_texts}"
-        llm_response = self._llm.generate(system_prompt, user_prompt)
+        return self._answer_from_text(response, refs)
 
-        parts = llm_response.split("---")
-        return CoachAnswer(
-            source_grounded=parts[0].strip() if len(parts) > 0 else "",
-            mechanical_approx=parts[1].strip() if len(parts) > 1 else "",
-            coach_interpretation=parts[2].strip() if len(parts) > 2 else llm_response,
-            references=[r.to_ref() for r in refs],
+    def review_decision(self, context: dict[str, Any]) -> CoachAnswer:
+        """复盘一个已提交判断；context 已由 extractor 按判断边界裁剪。"""
+        query = str(context.get("judgment", {}).get("payload", {}))
+        search = getattr(self._knowledge, "search", self._knowledge.search_by_concept)
+        refs = search(query, max_results=5)
+        # Never send posterior trades or any unbounded fields to an LLM.
+        safe_context = {
+            k: context.get(k)
+            for k in (
+                "session_id",
+                "judgment_id",
+                "day",
+                "bar_index",
+                "bars",
+                "ema20",
+                "key_levels",
+                "candidates",
+                "judgment",
+            )
+        }
+        safe_context["candidates"] = [
+            c for c in (safe_context.get("candidates") or []) if c.get("bar_index", 0) <= safe_context["bar_index"]
+        ]
+        if not self._llm or not self.enabled:
+            return CoachAnswer(
+                source_grounded="知识库没有足够依据，或 AI 未配置。",
+                mechanical_approx="已保留判断时刻的机械上下文；未调用远程模型。",
+                coach_interpretation="请依据当时可见的 K 线和规则自行复盘。",
+                references=[r.to_ref() for r in refs],
+                insufficient_evidence=not bool(refs),
+            )
+        ref_text = (
+            "\n".join(f"[{r.book_code} PDF p{r.pdf_page}] {r.content[:500]}" for r in refs[:3]) or "（无匹配原书片段）"
         )
+        prompt = self.decision_review_prompt(safe_context, ref_text)
+        response = self._llm.generate(self._system_prompt() + "\n" + self._review_rules(), prompt)
+        return self._answer_from_text(response, refs)
+
+    # Compatibility aliases for callers using review terminology.
+    review_judgment = review_decision
+
+    def summary_review(self, contexts: list[dict[str, Any]]) -> dict[str, Any]:
+        return {"reviews": [self.review_decision(c) for c in contexts]}
+
+    @staticmethod
+    def decision_review_prompt(context: dict[str, Any], references: str = "") -> str:
+        return (
+            "执行判断复盘。以下 JSON 只包含提交判断时已经可见的信息；严禁推断或引用之后的行情、交易结果或未来数据。\n"
+            "请严格输出 JSON 对象，字段必须为 source_grounded、mechanical_approx、"
+            "coach_interpretation、references、insufficient_evidence。"
+            "前三个字段为字符串，references 为数组，insufficient_evidence 为布尔值。\n"
+            f"判断上下文：{json.dumps(context, ensure_ascii=False, separators=(',', ':'))}\n"
+            f"知识库片段：{references}"
+        )
+
+    @staticmethod
+    def _system_prompt() -> str:
+        return "你是 Al Brooks 价格行为学习教练。只教练，不做最终交易决定；不编造页码或原意。"
+
+    @staticmethod
+    def _review_rules() -> str:
+        return "来源必须分成：原书依据、系统机械近似、教练解释；依据不足时明确标记 insufficient_evidence。"
+
+    @staticmethod
+    def _answer_from_text(text: str, refs: list[Any]) -> CoachAnswer:
+        try:
+            obj = json.loads(text)
+            return CoachAnswer(
+                str(obj.get("source_grounded", "")),
+                str(obj.get("mechanical_approx", "")),
+                str(obj.get("coach_interpretation", "")),
+                obj.get("references") or [r.to_ref() for r in refs],
+                bool(obj.get("insufficient_evidence", False)),
+            )
+        except (ValueError, TypeError):
+            parts = text.split("---")
+            return CoachAnswer(
+                parts[0].strip(),
+                parts[1].strip() if len(parts) > 1 else "",
+                parts[2].strip() if len(parts) > 2 else text,
+                [r.to_ref() for r in refs],
+            )

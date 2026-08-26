@@ -20,6 +20,7 @@ data/demo/
 data/imports/
 data/exports/
 data/knowledge/
+data/cache/
 data/app.sqlite
 data/app.sqlite-wal
 data/app.sqlite-shm

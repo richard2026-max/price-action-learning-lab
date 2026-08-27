@@ -83,7 +83,14 @@ def review_judgment(
 
 
 @router.get("/sessions/{session_id}/judgments/{judgment_id}/analogs")
-def analogs(request: Request, session_id: str, judgment_id: int) -> dict:
+def analogs(
+    request: Request,
+    session_id: str,
+    judgment_id: int,
+    target_date: str | None = Query(None, description="指定过往某一天 (YYYY-MM-DD)"),
+    start_date: str | None = Query(None, description="指定过往日期范围开始 (YYYY-MM-DD)"),
+    end_date: str | None = Query(None, description="指定过往日期范围结束 (YYYY-MM-DD)"),
+) -> dict:
     try:
         replay = request.app.state.replay_service
         session = replay._repo.get(session_id)
@@ -98,7 +105,12 @@ def analogs(request: Request, session_id: str, judgment_id: int) -> dict:
         )
         history = [bar for bar in history if bar.session == SessionType.RTH]
         matches = request.app.state.analog_search_service.search(
-            query, history_bars=history, top_k=3
+            query,
+            history_bars=history,
+            top_k=3,
+            target_date=target_date,
+            start_date=start_date,
+            end_date=end_date,
         )
         return {"session_id": session_id, "judgment_id": judgment_id, "matches": [asdict(m) for m in matches]}
     except ReplayError as error:

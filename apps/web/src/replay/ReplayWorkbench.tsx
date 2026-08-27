@@ -281,6 +281,8 @@ export default function ReplayWorkbench() {
   const [reviewCache, setReviewCache] = useState<Record<number, CoachReview>>({});
   const [analogCache, setAnalogCache] = useState<Record<number, AnalogMatch[]>>({});
   const [analogMatches, setAnalogMatches] = useState<AnalogMatch[]>([]);
+  const [analogFilterDate, setAnalogFilterDate] = useState("");
+  const [analogLoading, setAnalogLoading] = useState(false);
   const [coachJudgment, setCoachJudgment] = useState<Judgment | null>(null);
   const [coachError, setCoachError] = useState("");
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
@@ -423,6 +425,7 @@ export default function ReplayWorkbench() {
     setCoachJudgment(judgment);
     setCoachError("");
     setCoachOpen(true);
+    setAnalogFilterDate("");
 
     const sid = detail.session_id;
     const jid = judgment.id;
@@ -469,6 +472,21 @@ export default function ReplayWorkbench() {
       setCoachError(String(e));
     } finally {
       setCoachLoading(false);
+    }
+  };
+
+  const handleFetchAnalogsByDate = async (targetDate: string) => {
+    if (!detail || !coachJudgment) return;
+    setAnalogLoading(true);
+    try {
+      const res = await searchJudgmentAnalogs(detail.session_id, coachJudgment.id, {
+        target_date: targetDate || undefined,
+      });
+      setAnalogMatches(res.matches);
+    } catch {
+      setAnalogMatches([]);
+    } finally {
+      setAnalogLoading(false);
     }
   };
 
@@ -1089,8 +1107,40 @@ export default function ReplayWorkbench() {
                   )}
                 </div>
                 <div className="coach-extension">
-                  <div className="coach-section-label">
-                    📊 过往 SPY 历史相似走势走势图 (严格排除当前训练日) <span className="pill blue">TOP {analogMatches.length}</span>
+                  <div className="analog-extension-header">
+                    <div className="coach-section-label">
+                      📊 过往 SPY 历史相似走势走势图 (严格排除当前训练日) <span className="pill blue">TOP {analogMatches.length}</span>
+                    </div>
+                    <div className="analog-date-filter">
+                      <span className="filter-hint">限定过往日期：</span>
+                      <input
+                        type="date"
+                        value={analogFilterDate}
+                        onChange={(e) => setAnalogFilterDate(e.target.value)}
+                        placeholder="选择过往日期"
+                        title="输入或选择要限定检索的过往 SPY 交易日 (YYYY-MM-DD)"
+                      />
+                      <button
+                        className="small secondary"
+                        onClick={() => handleFetchAnalogsByDate(analogFilterDate)}
+                        disabled={!analogFilterDate || analogLoading}
+                      >
+                        {analogLoading ? "检索中…" : "抓取该日形态"}
+                      </button>
+                      {analogFilterDate && (
+                        <button
+                          className="small ghost"
+                          onClick={() => {
+                            setAnalogFilterDate("");
+                            handleFetchAnalogsByDate("");
+                          }}
+                          disabled={analogLoading}
+                          title="重置为全量过往历史检索"
+                        >
+                          恢复全部历史
+                        </button>
+                      )}
+                    </div>
                   </div>
                   {analogMatches.length ? (
                     <div className="analog-list">

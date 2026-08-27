@@ -65,3 +65,27 @@ def test_reports_ten_bar_forward_direction_and_result():
     assert match.forward_direction == "up"
     assert match.forward_result == "up"
     assert match.forward_return is not None and match.forward_return > 0
+
+
+def test_filter_by_target_date_and_date_range():
+    cand_1 = make_bars(list(range(100, 120)), datetime(2024, 1, 2, 14, 30, tzinfo=UTC))
+    cand_2 = make_bars(list(range(100, 120)), datetime(2024, 1, 3, 14, 30, tzinfo=UTC))
+    cand_3 = make_bars(list(range(100, 120)), datetime(2024, 1, 4, 14, 30, tzinfo=UTC))
+    query = make_bars(list(range(50, 70)), datetime(2024, 1, 5, 14, 30, tzinfo=UTC))
+    history = cand_1 + cand_2 + cand_3 + query
+
+    # 1. 过滤指定单日
+    matches_single = AnalogSearchService(history_bars=history, window_length=20).search(
+        query, target_date="2024-01-03"
+    )
+    assert len(matches_single) == 1
+    assert matches_single[0].date.isoformat() == "2024-01-03"
+
+    # 2. 过滤日期区间
+    matches_range = AnalogSearchService(history_bars=history, window_length=20).search(
+        query, start_date="2024-01-03", end_date="2024-01-04"
+    )
+    assert len(matches_range) == 2
+    dates = [m.date.isoformat() for m in matches_range]
+    assert "2024-01-02" not in dates
+    assert "2024-01-03" in dates and "2024-01-04" in dates

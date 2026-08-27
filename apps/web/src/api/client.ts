@@ -250,10 +250,20 @@ export interface AnalogMatch {
   chart_image_url?: string;
 }
 
-export const searchJudgmentAnalogs = (sessionId: string, judgmentId: number) =>
-  fetch(`${BASE}/coach/sessions/${sessionId}/judgments/${judgmentId}/analogs`).then((r) =>
+export const searchJudgmentAnalogs = (
+  sessionId: string,
+  judgmentId: number,
+  filters?: { target_date?: string; start_date?: string; end_date?: string },
+) => {
+  const params = new URLSearchParams();
+  if (filters?.target_date) params.set("target_date", filters.target_date);
+  if (filters?.start_date) params.set("start_date", filters.start_date);
+  if (filters?.end_date) params.set("end_date", filters.end_date);
+  const qs = params.toString() ? `?${params.toString()}` : "";
+  return fetch(`${BASE}/coach/sessions/${sessionId}/judgments/${judgmentId}/analogs${qs}`).then((r) =>
     j<{ session_id: string; judgment_id: number; matches: AnalogMatch[] }>(r),
   );
+};
 
 export const addAnnotation = (id: string, provider: Provider, barIndex: number, kind: "label" | "note", label: string | null, text: string | null) =>
   fetch(`${BASE}/replay/sessions/${id}/annotations?${q(provider)}`, {

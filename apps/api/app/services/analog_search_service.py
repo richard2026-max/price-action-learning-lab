@@ -86,8 +86,11 @@ class AnalogSearchService:
         forward_bars: int | None = None,
         top_k: int | None = None,
         include_ema: bool | None = None,
+        target_date: date | str | None = None,
+        start_date: date | str | None = None,
+        end_date: date | str | None = None,
     ) -> list[AnalogMatch]:
-        """检索查询序列最后一个窗口；候选必须有完整的后续结果 K 线。"""
+        """检索查询序列最后一个窗口；候选必须有完整的后续结果 K 线。支持指定日期或日期范围。"""
         n = window_length if window_length is not None else self.window_length
         horizon = forward_bars if forward_bars is not None else self.forward_bars
         limit = top_k if top_k is not None else self.top_k
@@ -117,12 +120,26 @@ class AnalogSearchService:
         query_date = query_window[0].ts_open_utc.date()
         has_other_days = any(b.ts_open_utc.date() != query_date for b in history)
 
+        t_date = date.fromisoformat(target_date) if isinstance(target_date, str) else target_date
+        s_date = date.fromisoformat(start_date) if isinstance(start_date, str) else start_date
+        e_date = date.fromisoformat(end_date) if isinstance(end_date, str) else end_date
+
         matches: list[AnalogMatch] = []
         for i in range(0, len(history) - n - horizon + 1):
             window = history[i : i + n]
             w_start, w_end = window[0].ts_open_utc, window[-1].ts_close_utc
+            w_date = w_start.date()
+
+            # 支持指定特定历史交易日或日期区间进行精准比对
+            if t_date and w_date != t_date:
+                continue
+            if s_date and w_date < s_date:
+                continue
+            if e_date and w_date > e_date:
+                continue
+
             # 严格排除当前训练日：当存在多日历史数据时，排除属于当前训练日的任何候选（仅找过往真实 SPY 历史）
-            if has_other_days and w_start.date() == query_date:
+            if has_other_days and w_date == query_date:
                 continue
             if w_start < q_end and w_end > q_start:
                 continue  # 排除查询窗口本身及任何重叠窗口；边界相接不算重叠

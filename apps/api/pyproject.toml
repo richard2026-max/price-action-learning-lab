@@ -27,6 +27,7 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.5",
     "mypy>=1.10",
+    "httpx2>=2.0",  # starlette 1.6+ testclient 优先使用 httpx2（缺省回退 httpx 并产生弃用警告）
 ]
 
 [project.scripts]

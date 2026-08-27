@@ -110,6 +110,16 @@ class AICoachService:
             "temperature": self._settings.ai_temperature,
         }
 
+    def evict_review(self, session_id: str, judgment_id: int) -> None:
+        """清除指定判断的 AI 复盘内存缓存。"""
+        self._review_cache.pop((session_id, judgment_id), None)
+
+    def evict_session(self, session_id: str) -> None:
+        """清除整场会话的全部 AI 复盘内存缓存。"""
+        keys_to_del = [k for k in self._review_cache if k[0] == session_id]
+        for k in keys_to_del:
+            self._review_cache.pop(k, None)
+
     def ask_concept(self, concept_term: str, question: str = "") -> CoachAnswer:
         refs = self._knowledge.search_by_concept(concept_term, max_results=5)
         if not refs:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.api.deps import get_replay_service, resolve_instrument
 from app.replay.service import ReplayError, ReplayService
@@ -157,6 +157,47 @@ def list_judgments(
         )
         for j in svc._repo.list_judgments(session_id)
     ]
+
+
+@router.delete("/sessions/{session_id}/judgments/{judgment_id}")
+def delete_judgment(
+    session_id: str,
+    judgment_id: int,
+    request: Request,
+    provider: str = "synthetic",
+    instrument_id: str = "SPY",
+    svc: ReplayService = Depends(get_replay_service),
+) -> dict:
+    """删除指定判断记录，并级联清理对应的 AI 复盘缓存。"""
+    _ = resolve_instrument(instrument_id, provider)
+    try:
+        svc.delete_judgment(session_id, judgment_id)
+        coach_svc = getattr(request.app.state, "ai_coach_service", None)
+        if coach_svc and hasattr(coach_svc, "evict_review"):
+            coach_svc.evict_review(session_id, judgment_id)
+        return {"status": "ok", "deleted_judgment_id": judgment_id}
+    except ReplayError as e:
+        raise _http(e) from None
+
+
+@router.delete("/sessions/{session_id}")
+def delete_session(
+    session_id: str,
+    request: Request,
+    provider: str = "synthetic",
+    instrument_id: str = "SPY",
+    svc: ReplayService = Depends(get_replay_service),
+) -> dict:
+    """删除整场回放会话（外键级联清空全部关联判断、模拟交易与笔记）。"""
+    _ = resolve_instrument(instrument_id, provider)
+    try:
+        svc.delete_session(session_id)
+        coach_svc = getattr(request.app.state, "ai_coach_service", None)
+        if coach_svc and hasattr(coach_svc, "evict_session"):
+            coach_svc.evict_session(session_id)
+        return {"status": "ok", "deleted_session_id": session_id}
+    except ReplayError as e:
+        raise _http(e) from None
 
 
 @router.post("/sessions/{session_id}/annotations", response_model=AnnotationOut, status_code=201)

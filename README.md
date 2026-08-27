@@ -73,11 +73,11 @@ npm run build
 
 ```bash
 cd apps/api
-.venv/Scripts/python -m pytest tests/   # 75 项测试全绿（含 no-lookahead 权威断言）
+.venv/Scripts/python -m pytest tests/   # 92 项测试全绿（含 no-lookahead 权威断言）
 .venv/Scripts/python -m ruff check app tests
 .venv/Scripts/python -m mypy app
 ```
 
 ## 状态总览
 
-- **Phase 0 到 MVP-D + Level 5 全部形态**：✅ **100% 全链路交付**（75 项测试全绿，Ruff 0 违规，Mypy 0 错误）。
+- **Phase 0 到 MVP-D + Level 5 全部形态**：✅ **100% 全链路交付**（92 项测试全绿，Ruff 0 违规，Mypy 0 错误）。

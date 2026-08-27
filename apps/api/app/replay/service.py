@@ -214,6 +214,21 @@ class ReplayService:
             orm.id, req.bar_index, bar.ts_close_utc, req.kind, req.label, req.text
         )
 
+    def delete_judgment(self, session_id: str, judgment_id: int) -> bool:
+        orm = self._repo.get(session_id)
+        if orm is None:
+            raise ReplayError("not_found", "session 不存在", 404)
+        deleted = self._repo.delete_judgment(session_id, judgment_id)
+        if not deleted:
+            raise ReplayError("not_found", "judgment 不存在", 404)
+        return True
+
+    def delete_session(self, session_id: str) -> bool:
+        deleted = self._repo.delete_session(session_id)
+        if not deleted:
+            raise ReplayError("not_found", "session 不存在", 404)
+        return True
+
     # ---------- 视图组装（context_bars + 训练日可见bars） ----------
     def _detail(self, orm, data: _DayData) -> SessionDetailOut:
         from app.schemas.replay import CandidateOut

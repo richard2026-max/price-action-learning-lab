@@ -224,3 +224,9 @@ Batch 8: 补齐审计遗漏交付物 + 残留一致性修正（2026-08-16，独�
   2. 课件原版形态图示：集成 pypdfium2 高保真页面渲染引擎，提供 GET /knowledge/page-image 接口及磁盘缓存；复盘卡片直接展示阿布原版 PPT 课件幻灯片大图，并支持全屏 Lightbox 高清放大查看。
   3. 过往历史 SPY 真实走势图：AnalogSearchService 严格排除当前训练日（只在过往历史多日中检索）；集成 matplotlib 专业暗色 K 线图渲染引擎，直接直出包含 20 根匹配形态与随后 10 根演化走向的 PNG 真实走势大图，辅以交互式矢量蜡烛图对比。
   4. 验证：后端全量 90 项测试全绿；Ruff 0 违规；Mypy 0 错误；前端 npm run build 打包成功；浏览器端到端实操验证通过。
+
+- Batch 29 完成（安全级联删除判断与会话 + 日期定向抓取历史形态，2026-08-28）：
+  1. 单条判断级联删除：DELETE /api/v1/replay/sessions/{session_id}/judgments/{judgment_id}，删除数据库判断记录并级联清理内存与 localStorage 的 AI 复盘及形态缓存，图表标记同步更新。
+  2. 整场会话级联删除：DELETE /api/v1/replay/sessions/{session_id}，外键级联清理整场全部判断、模拟交易与笔记，彻底消除脏测试数据。
+  3. 安全物理隔离：所有删除操作严格限定在业务实体 ID 范围，绝对不触及 data/cache/knowledge_index.json 核心课件索引。
+  4. 验证：后端全量 92 项测试全绿；Ruff 0 违规；Mypy 0 错误；前端构建打包通过。

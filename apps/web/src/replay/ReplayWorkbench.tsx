@@ -14,6 +14,8 @@ import {
   goBack,
   listDays,
   listJudgments,
+  deleteJudgment,
+  deleteSession,
   listSessionTrades,
   manualExitTrade,
   randomDay,
@@ -505,6 +507,76 @@ export default function ReplayWorkbench() {
     setTimeout(() => setMsg(""), 3000);
   };
 
+  const handleDeleteJudgment = async (judgmentId: number) => {
+    if (!detail) return;
+    if (!window.confirm("确定删除该条判断记录及其关联的 AI 复盘和形态缓存吗？")) return;
+    try {
+      const prov = curProvider(detail);
+      await deleteJudgment(detail.session_id, judgmentId, prov);
+      setJudgments((prev) => prev.filter((j) => j.id !== judgmentId));
+      setReviewCache((prev) => {
+        const next = { ...prev };
+        delete next[judgmentId];
+        return next;
+      });
+      setAnalogCache((prev) => {
+        const next = { ...prev };
+        delete next[judgmentId];
+        return next;
+      });
+      localStorage.removeItem(`pall_coach_review_${detail.session_id}_${judgmentId}`);
+      localStorage.removeItem(`pall_coach_analogs_${detail.session_id}_${judgmentId}`);
+      if (coachJudgment?.id === judgmentId) {
+        setCoachOpen(false);
+        setCoachJudgment(null);
+        setCoachReview(null);
+        setAnalogMatches([]);
+      }
+      try {
+        apply(await getSession(detail.session_id, prov));
+      } catch {
+        /* ignore */
+      }
+      setMsg("判断记录及关联复盘已安全清除 ✓");
+      setTimeout(() => setMsg(""), 3000);
+    } catch (e) {
+      setMsg(`删除失败：${e}`);
+    }
+  };
+
+  const handleDeleteCurrentSession = async () => {
+    if (!detail) return;
+    if (
+      !window.confirm(
+        "确定彻底删除本次训练会话吗？\n该会话下的所有判断记录、模拟交易持仓和笔记都将被清空，且不计入学习分析统计。"
+      )
+    ) {
+      return;
+    }
+    try {
+      const prov = curProvider(detail);
+      await deleteSession(detail.session_id, prov);
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.includes(detail.session_id)) {
+          localStorage.removeItem(k);
+        }
+      }
+      localStorage.removeItem(LAST_SESSION_KEY);
+      setDetail(null);
+      setJudgments([]);
+      setTrades([]);
+      setCoachOpen(false);
+      setCoachJudgment(null);
+      setCoachReview(null);
+      setAnalogMatches([]);
+      setMsg("本次测试会话已彻底删除清理 ✓");
+      setTimeout(() => setMsg(""), 3000);
+    } catch (e) {
+      setMsg(`删除会话失败：${e}`);
+    }
+  };
+
   const handleCreateTrade = async () => {
     if (!detail) return;
     const prov = curProvider(detail);
@@ -751,6 +823,13 @@ export default function ReplayWorkbench() {
             >
               ✕ 结束会话
             </button>
+            <button
+              className="ghost small coach-discard-btn"
+              onClick={handleDeleteCurrentSession}
+              title="彻底删除本次训练会话（清空其全部判断、持仓与笔记）"
+            >
+              🗑️ 丢弃会话
+            </button>
           </div>
         </div>
 
@@ -919,6 +998,16 @@ export default function ReplayWorkbench() {
                           🔄
                         </button>
                       )}
+                      <button
+                        className="small ghost coach-delete-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteJudgment(j.id);
+                        }}
+                        title="删除该判断记录及对应的 AI 复盘与形态缓存"
+                      >
+                        🗑️
+                      </button>
                     </div>
                   </div>
                 </div>

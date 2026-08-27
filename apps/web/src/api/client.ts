@@ -189,6 +189,16 @@ export const submitJudgment = (id: string, provider: Provider, payload: Judgment
 export const listJudgments = (id: string, provider: Provider) =>
   fetch(`${BASE}/replay/sessions/${id}/judgments?${q(provider)}`).then((r) => j<Judgment[]>(r));
 
+export const deleteJudgment = (sessionId: string, judgmentId: number, provider: Provider) =>
+  fetch(`${BASE}/replay/sessions/${sessionId}/judgments/${judgmentId}?${q(provider)}`, {
+    method: "DELETE",
+  }).then((r) => j<{ status: string; deleted_judgment_id: number }>(r));
+
+export const deleteSession = (sessionId: string, provider: Provider) =>
+  fetch(`${BASE}/replay/sessions/${sessionId}?${q(provider)}`, {
+    method: "DELETE",
+  }).then((r) => j<{ status: string; deleted_session_id: string }>(r));
+
 // ---------- AI 对照复盘 ----------
 
 export interface CoachConfig {

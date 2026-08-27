@@ -77,6 +77,24 @@ class ReplayRepository:
                 s.expunge(r)
             return list(rows)
 
+    def delete_judgment(self, session_id: str, judgment_id: int) -> bool:
+        with self._factory() as s:
+            orm = s.get(JudgmentORM, judgment_id)
+            if orm is None or orm.session_id != session_id:
+                return False
+            s.delete(orm)
+            s.commit()
+            return True
+
+    def delete_session(self, session_id: str) -> bool:
+        with self._factory() as s:
+            orm = s.get(ReplaySessionORM, session_id)
+            if orm is None:
+                return False
+            s.delete(orm)
+            s.commit()
+            return True
+
     def add_annotation(
         self,
         session_id: str,

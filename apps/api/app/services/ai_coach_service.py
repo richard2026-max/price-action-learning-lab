@@ -39,21 +39,32 @@ class OpenAICompatProvider(LLMProvider):
         self._temperature = ai_temperature
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
+        import time
+
         import httpx
 
-        resp = httpx.post(
-            f"{self._base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {self._key}"},
-            json={
-                "model": self._model,
-                "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
-                "temperature": self._temperature,
-            },
-            timeout=60,
-        )
-        if resp.status_code != 200:
-            raise RuntimeError(f"LLM {resp.status_code}: {resp.text[:200]}")
-        return resp.json()["choices"][0]["message"]["content"]
+        max_retries = 3
+        for attempt in range(max_retries):
+            resp = httpx.post(
+                f"{self._base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {self._key}"},
+                json={
+                    "model": self._model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "temperature": self._temperature,
+                },
+                timeout=60,
+            )
+            if resp.status_code == 429 and attempt < max_retries - 1:
+                time.sleep(2.0 * (attempt + 1))
+                continue
+            if resp.status_code != 200:
+                raise RuntimeError(f"LLM {resp.status_code}: {resp.text[:200]}")
+            return resp.json()["choices"][0]["message"]["content"]
+        raise RuntimeError("LLM 429: 模型调用并发频率超限，请稍候重试")
 
 
 class AICoachService:
@@ -160,11 +171,25 @@ class AICoachService:
             "\n".join(f"[{r.book_code} PDF p{r.pdf_page}] {r.content[:500]}" for r in refs[:3]) or "（无匹配原书片段）"
         )
         prompt = self.decision_review_prompt(safe_context, ref_text)
-        response = self._llm.generate(self._system_prompt() + "\n" + self._review_rules(), prompt)
-        answer = self._answer_from_text(response, refs)
-        if session_id and judgment_id:
-            self._review_cache[cache_key] = answer
-        return answer
+        try:
+            response = self._llm.generate(self._system_prompt() + "\n" + self._review_rules(), prompt)
+            answer = self._answer_from_text(response, refs)
+            if session_id and judgment_id:
+                self._review_cache[cache_key] = answer
+            return answer
+        except Exception as e:
+            err_msg = str(e)
+            if "429" in err_msg or "rate limit" in err_msg.lower():
+                diag = "模型接口并发频率受限 (429 Rate Limit)，请稍候 2 秒后点击右上角「🔄 重新分析」重试。"
+            else:
+                diag = f"AI 服务暂不可用 ({err_msg[:120]})，请稍候点击「🔄 重新分析」。"
+            return CoachAnswer(
+                source_grounded="当前远程分析暂未就绪，已保留本地知识库相关依据。",
+                mechanical_approx="已保留判断时点可见的客观事实与价格形态。",
+                coach_interpretation=diag,
+                references=[r.to_ref() for r in refs],
+                insufficient_evidence=True,
+            )
 
     # Compatibility aliases for callers using review terminology.
     review_judgment = review_decision
@@ -181,8 +206,8 @@ class AICoachService:
             "2. 只能基于当时可见行情与事实，严禁推断或引用之后的行情、未来数据或后验交易盈亏。\n"
             "3. 必须直接输出合法标准 JSON 对象，严禁使用 ```json 或 ``` 代码块包裹，首字符必须是 {，末字符必须是 }。\n"
             "4. JSON 对象必须且只能包含以下 5 个字段：\n"
-            "   - \"source_grounded\": 纯文本字符串。对照原书/课件理论依据（严禁包含未解析 JSON 或代码块）。\n"
-            "   - \"mechanical_approx\": 纯文本字符串。系统客观形态识别器与关键价位/指标状态分析。\n"
+            "   - \"source_grounded\": 纯文本字符串。对照阿布价格行为学课件原意（严禁包含未解析 JSON 或代码块）。\n"
+            "   - \"mechanical_approx\": 纯文本字符串。当前行情客观事实与技术形态分析。\n"
             "   - \"coach_interpretation\": 纯文本字符串。针对学员方向、理由、止损与目标的教练诊断与思维纠偏。\n"
             '   - "references": 数组。每项为 {"book": "T/R/REV/COURSE", '
             '"pdf_page": 数字页码, "content": "要点摘要"}。\n'
@@ -200,7 +225,10 @@ class AICoachService:
 
     @staticmethod
     def _review_rules() -> str:
-        return "必须清晰区分三层：原书依据、系统机械近似、教练解释；依据不足时明确标记 insufficient_evidence 为 true。"
+        return (
+            "必须清晰区分三层：阿布价格行为学课件原意、当前行情客观事实、教练解释；"
+            "依据不足时明确标记 insufficient_evidence 为 true。"
+        )
 
     @staticmethod
     def _answer_from_text(text: str, refs: list[Any]) -> CoachAnswer:
@@ -330,8 +358,14 @@ class AICoachService:
                 parts[2].strip() if len(parts) > 2 else clean,
                 [r.to_ref() for r in refs],
             )
-        p1 = re.search(r"【(?:原书依据|理论依据)】|原书依据\s*[:：]", clean)
-        p2 = re.search(r"【(?:系统机械近似|机械近似)】|机械近似\s*[:：]", clean)
+        p1 = re.search(
+            r"【(?:阿布价格行为学课件原意|课件原意|原书依据|理论依据)】|(?:课件原意|原书依据)\s*[:：]",
+            clean,
+        )
+        p2 = re.search(
+            r"【(?:当前行情客观事实|行情客观事实|系统机械近似|机械近似)】|(?:行情客观事实|机械近似)\s*[:：]",
+            clean,
+        )
         p3 = re.search(r"【(?:教练解释|学员诊断)】|教练解释\s*[:：]", clean)
         if p1 and p2 and p3:
             s1 = clean[p1.end() : p2.start()].strip()

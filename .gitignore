@@ -25,6 +25,7 @@ data/app.sqlite
 data/app.sqlite-wal
 data/app.sqlite-shm
 data/.write_test
+**/data/
 
 # 系统
 .DS_Store

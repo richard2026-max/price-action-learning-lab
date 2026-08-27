@@ -208,6 +208,7 @@ export interface CoachReference {
   source_type?: string;
   source_file?: string;
   content?: string;
+  image_url?: string;
 }
 
 export interface CoachReview {
@@ -226,6 +227,14 @@ export const reviewJudgmentWithCoach = (sessionId: string, judgmentId: number, r
     method: "POST",
   }).then((r) => j<CoachReview>(r));
 
+export interface AnalogBar {
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  time: string;
+}
+
 export interface AnalogMatch {
   date: string;
   start_time: string;
@@ -236,6 +245,9 @@ export interface AnalogMatch {
   forward_direction: string;
   forward_result: string;
   forward_return: number | null;
+  window_bars?: AnalogBar[];
+  forward_bars?: AnalogBar[];
+  chart_image_url?: string;
 }
 
 export const searchJudgmentAnalogs = (sessionId: string, judgmentId: number) =>

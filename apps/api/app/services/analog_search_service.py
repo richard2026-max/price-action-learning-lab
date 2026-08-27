@@ -8,8 +8,10 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
+from pathlib import Path
+from typing import Any
 
 from app.domain.bar import Bar, Timeframe
 from app.domain.instrument import Instrument
@@ -29,6 +31,9 @@ class AnalogMatch:
     forward_direction: str
     forward_result: str
     forward_return: float | None
+    window_bars: list[dict[str, Any]] = field(default_factory=list)
+    forward_bars: list[dict[str, Any]] = field(default_factory=list)
+    chart_image_url: str | None = None
 
     @property
     def start(self) -> datetime:
@@ -109,10 +114,16 @@ class AnalogSearchService:
 
         q_features = self._features(query_window, use_ema)
         q_start, q_end = query_window[0].ts_open_utc, query_window[-1].ts_close_utc
+        query_date = query_window[0].ts_open_utc.date()
+        has_other_days = any(b.ts_open_utc.date() != query_date for b in history)
+
         matches: list[AnalogMatch] = []
         for i in range(0, len(history) - n - horizon + 1):
             window = history[i : i + n]
             w_start, w_end = window[0].ts_open_utc, window[-1].ts_close_utc
+            # 严格排除当前训练日：当存在多日历史数据时，排除属于当前训练日的任何候选（仅找过往真实 SPY 历史）
+            if has_other_days and w_start.date() == query_date:
+                continue
             if w_start < q_end and w_end > q_start:
                 continue  # 排除查询窗口本身及任何重叠窗口；边界相接不算重叠
             # 只接受连续时间序列的窗口，避免跨缺失桶造成伪形态。
@@ -138,10 +149,51 @@ class AnalogSearchService:
                     forward_direction=direction,
                     forward_result=self._forward_result(direction, change),
                     forward_return=round(change, 6) if change is not None else None,
+                    window_bars=[
+                        {
+                            "open": round(b.open, 2),
+                            "high": round(b.high, 2),
+                            "low": round(b.low, 2),
+                            "close": round(b.close, 2),
+                            "time": b.ts_open_utc.isoformat(),
+                        }
+                        for b in window
+                    ],
+                    forward_bars=[
+                        {
+                            "open": round(b.open, 2),
+                            "high": round(b.high, 2),
+                            "low": round(b.low, 2),
+                            "close": round(b.close, 2),
+                            "time": b.ts_open_utc.isoformat(),
+                        }
+                        for b in future
+                    ],
                 )
             )
         matches.sort(key=lambda m: (m.distance, m.start_time))
-        return matches[:limit]
+        top_matches = matches[:limit]
+
+        final_matches: list[AnalogMatch] = []
+        for m in top_matches:
+            chart_url = self._ensure_chart_image(m)
+            final_matches.append(
+                AnalogMatch(
+                    date=m.date,
+                    start_time=m.start_time,
+                    end_time=m.end_time,
+                    similarity=m.similarity,
+                    distance=m.distance,
+                    pattern_label=m.pattern_label,
+                    forward_direction=m.forward_direction,
+                    forward_result=m.forward_result,
+                    forward_return=m.forward_return,
+                    window_bars=m.window_bars,
+                    forward_bars=m.forward_bars,
+                    chart_image_url=chart_url,
+                )
+            )
+        return final_matches
 
     def find_analogs(self, query_bars: Sequence[Bar], **kwargs) -> list[AnalogMatch]:
         """search 的语义别名，便于服务层调用方使用更明确的名称。"""
@@ -216,3 +268,120 @@ class AnalogSearchService:
         if ratio >= 0.6:
             return "trend_up" if net > 0 else "trend_down"
         return "range"
+
+    def _ensure_chart_image(self, match: AnalogMatch) -> str | None:
+        try:
+            cache_name = (
+                f"analog_{match.date.isoformat()}_{match.start_time.strftime('%H%M%S')}_"
+                f"{int(match.similarity * 1000)}.png"
+            )
+            if self.store and hasattr(self.store, "data_dir"):
+                cache_dir = Path(self.store.data_dir) / "cache" / "analog_charts"
+            else:
+                from app.core.config import Settings
+
+                cache_dir = Settings().data_dir / "cache" / "analog_charts"
+            cache_path = cache_dir / cache_name
+
+            if match.forward_direction == "up":
+                dir_label = "上涨 ▲"
+            elif match.forward_direction == "down":
+                dir_label = "下跌 ▼"
+            else:
+                dir_label = "震荡 —"
+            ret_str = f" ({match.forward_return * 100:.2f}%)" if match.forward_return is not None else ""
+            title = (
+                f"SPY 5m 过往历史相似走势 · {match.date.isoformat()} "
+                f"({match.start_time.strftime('%H:%M')} - {match.end_time.strftime('%H:%M')}) · "
+                f"相似度 {match.similarity * 100:.1f}% · 走向: [{dir_label}{ret_str}]"
+            )
+            render_analog_candlestick_chart(match.window_bars, match.forward_bars, title, cache_path)
+            return f"/api/v1/coach/analogs/chart-image?file={cache_name}"
+        except Exception:
+            return None
+
+
+def render_analog_candlestick_chart(
+    bars_pattern: list[dict[str, Any]],
+    bars_forward: list[dict[str, Any]],
+    title_text: str,
+    output_path: Path,
+) -> Path:
+    """使用 matplotlib 绘制深色专业 K 线形态对比图（包含 20 根匹配形态与 10 根后续演化）。"""
+    if output_path.is_file() and output_path.stat().st_size > 0:
+        return output_path
+
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.patches as patches
+        import matplotlib.pyplot as plt
+
+        plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "sans-serif"]
+        plt.rcParams["axes.unicode_minus"] = False
+
+        fig, ax = plt.subplots(figsize=(8.5, 3.0), dpi=100)
+        fig.patch.set_facecolor("#0d1117")
+        ax.set_facecolor("#0d1117")
+
+        all_bars = bars_pattern + bars_forward
+        n = len(all_bars)
+        if n == 0:
+            plt.close(fig)
+            return output_path
+
+        highs = [b["high"] for b in all_bars]
+        lows = [b["low"] for b in all_bars]
+        max_h, min_l = max(highs), min(lows)
+        span = max_h - min_l or 1.0
+
+        for i, b in enumerate(all_bars):
+            is_bull = b["close"] >= b["open"]
+            color = "#26a69a" if is_bull else "#ef5350"
+            ax.plot([i, i], [b["low"], b["high"]], color=color, linewidth=1.1, zorder=2)
+            y = min(b["open"], b["close"])
+            h = max(0.04, abs(b["close"] - b["open"]))
+            rect = patches.Rectangle(
+                (i - 0.32, y), 0.64, h, facecolor=color, edgecolor=color, linewidth=0.5, zorder=3
+            )
+            ax.add_patch(rect)
+
+        split_i = len(bars_pattern) - 0.5
+        ax.axvline(split_i, color="#f0b90b", linestyle="--", linewidth=1.4, alpha=0.9, zorder=4)
+        if bars_forward:
+            ax.axvspan(split_i, n - 0.5, color="#2979ff", alpha=0.08, zorder=1)
+
+        ax.text(
+            len(bars_pattern) / 2 - 0.5,
+            max_h + span * 0.04,
+            "过往历史形态 (20 根)",
+            color="#8b949e",
+            fontsize=8.5,
+            ha="center",
+            weight="bold",
+        )
+        if bars_forward:
+            ax.text(
+                len(bars_pattern) + len(bars_forward) / 2 - 0.5,
+                max_h + span * 0.04,
+                "随后 10 根真实走向",
+                color="#2979ff",
+                fontsize=8.5,
+                ha="center",
+                weight="bold",
+            )
+
+        ax.set_title(title_text, color="#f0b90b", fontsize=9.5, pad=8, weight="bold")
+        ax.set_xlim(-0.8, n - 0.2)
+        ax.set_ylim(min_l - span * 0.08, max_h + span * 0.16)
+        ax.tick_params(colors="#8b949e", labelsize=8)
+        for spine in ax.spines.values():
+            spine.set_color("#30363d")
+        ax.grid(True, linestyle=":", color="#21262d", alpha=0.5)
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(output_path, format="png", bbox_inches="tight", facecolor=fig.get_facecolor(), edgecolor="none")
+        plt.close(fig)
+    except Exception:
+        pass
+    return output_path

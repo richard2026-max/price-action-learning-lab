@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import date
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import FileResponse
 
+from app.core.config import Settings
 from app.domain.bar import SessionType, Timeframe
 from app.domain.instrument import get_instrument
 from app.replay.service import ReplayError
@@ -55,12 +58,28 @@ def review_judgment(
     session_id: str,
     judgment_id: int,
     refresh: bool = Query(False, description="是否强制重新调用 AI 分析"),
-) -> CoachAnswer:
+) -> dict:
     try:
         context = _extractor(request).extract(session_id, judgment_id)
     except ReplayError as error:
         raise _review_error(error) from None
-    return _coach(request).review_decision(context, force_refresh=refresh)
+    ans = _coach(request).review_decision(context, force_refresh=refresh)
+    enriched_refs: list[dict] = []
+    for r in ans.references:
+        ref_item = dict(r)
+        page = ref_item.get("pdf_page")
+        if page and int(page) > 0:
+            book = ref_item.get("book", "")
+            src = ref_item.get("source_file", "")
+            ref_item["image_url"] = f"/api/v1/knowledge/page-image?pdf_page={page}&book={book}&source_file={src}"
+        enriched_refs.append(ref_item)
+    return {
+        "source_grounded": ans.source_grounded,
+        "mechanical_approx": ans.mechanical_approx,
+        "coach_interpretation": ans.coach_interpretation,
+        "references": enriched_refs,
+        "insufficient_evidence": ans.insufficient_evidence,
+    }
 
 
 @router.get("/sessions/{session_id}/judgments/{judgment_id}/analogs")
@@ -84,6 +103,16 @@ def analogs(request: Request, session_id: str, judgment_id: int) -> dict:
         return {"session_id": session_id, "judgment_id": judgment_id, "matches": [asdict(m) for m in matches]}
     except ReplayError as error:
         raise _review_error(error) from None
+
+
+@router.get("/analogs/chart-image")
+def get_analog_chart_image(request: Request, file: str = Query(...)) -> FileResponse:
+    """提供历史 SPY 相似走势的 K 线切片图像文件。"""
+    settings: Settings = getattr(request.app.state, "settings", Settings())
+    target = settings.data_dir / "cache" / "analog_charts" / Path(file).name
+    if not target.is_file():
+        raise HTTPException(404, "未找到指定的相似走势图表图片")
+    return FileResponse(str(target), media_type="image/png")
 
 
 @router.post("/sessions/{session_id}/summary-review")

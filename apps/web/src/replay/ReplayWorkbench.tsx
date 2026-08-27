@@ -21,6 +21,7 @@ import {
   getCoachConfig,
   reviewJudgmentWithCoach,
   searchJudgmentAnalogs,
+  type AnalogBar,
   type AnalogMatch,
   type Candidate,
   type CoachConfig,
@@ -129,6 +130,94 @@ function renderLayerBody(rawText: string | undefined, fieldKey: string, emptyFal
   );
 }
 
+function MiniCandleChart({
+  windowBars = [],
+  forwardBars = [],
+}: {
+  windowBars?: AnalogBar[];
+  forwardBars?: AnalogBar[];
+}) {
+  const allBars = [...windowBars, ...forwardBars];
+  if (allBars.length === 0) return null;
+
+  const minP = Math.min(...allBars.map((b) => b.low));
+  const maxP = Math.max(...allBars.map((b) => b.high));
+  const range = maxP - minP || 1.0;
+  const padding = range * 0.08;
+  const low = minP - padding;
+  const high = maxP + padding;
+  const totalRange = high - low;
+
+  const width = 360;
+  const height = 95;
+  const padLeft = 6;
+  const padRight = 6;
+  const plotWidth = width - padLeft - padRight;
+  const n = allBars.length;
+  const barW = Math.max(3, Math.min(7, (plotWidth / n) * 0.65));
+  const step = plotWidth / n;
+
+  const getY = (val: number) => height - ((val - low) / totalRange) * height;
+  const splitX = padLeft + windowBars.length * step;
+
+  return (
+    <div className="mini-candle-wrap">
+      <div className="mini-candle-legend">
+        <span>历史匹配形态 20 根</span>
+        <span className="legend-forward">后续 10 根演化走向</span>
+      </div>
+      <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} className="mini-candle-svg">
+        {forwardBars.length > 0 && (
+          <rect
+            x={splitX}
+            y={0}
+            width={width - splitX - padRight}
+            height={height}
+            fill="rgba(41, 121, 255, 0.08)"
+            rx={2}
+          />
+        )}
+        <line
+          x1={splitX}
+          y1={0}
+          x2={splitX}
+          y2={height}
+          stroke="rgba(240, 185, 11, 0.55)"
+          strokeDasharray="3 2"
+          strokeWidth={1}
+        />
+        {allBars.map((b, i) => {
+          const isBull = b.close >= b.open;
+          const color = isBull ? "#26a69a" : "#ef5350";
+          const cx = padLeft + i * step + step / 2;
+          const yHigh = getY(b.high);
+          const yLow = getY(b.low);
+          const yOpen = getY(b.open);
+          const yClose = getY(b.close);
+          const bodyY = Math.min(yOpen, yClose);
+          const bodyH = Math.max(1.5, Math.abs(yClose - yOpen));
+
+          return (
+            <g key={i}>
+              <line x1={cx} y1={yHigh} x2={cx} y2={yLow} stroke={color} strokeWidth={1} />
+              <rect
+                x={cx - barW / 2}
+                y={bodyY}
+                width={barW}
+                height={bodyH}
+                fill={color}
+                stroke={color}
+                strokeWidth={0.5}
+                rx={0.5}
+              />
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 function getStoredReview(sessionId: string, judgmentId: number): CoachReview | null {
   try {
     const raw = localStorage.getItem(`pall_coach_review_${sessionId}_${judgmentId}`);
@@ -194,6 +283,7 @@ export default function ReplayWorkbench() {
   const [analogMatches, setAnalogMatches] = useState<AnalogMatch[]>([]);
   const [coachJudgment, setCoachJudgment] = useState<Judgment | null>(null);
   const [coachError, setCoachError] = useState("");
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [showMarkers, setShowMarkers] = useState(true);
@@ -931,15 +1021,15 @@ export default function ReplayWorkbench() {
                   <article className="coach-layer source">
                     <span className="coach-layer-index">01</span>
                     <div>
-                      <h4>原书依据</h4>
-                      {renderLayerBody(coachReview.source_grounded, "source_grounded", "暂无可引用的原书依据。")}
+                      <h4>阿布价格行为学课件原意</h4>
+                      {renderLayerBody(coachReview.source_grounded, "source_grounded", "暂无可引用的课件原意。")}
                     </div>
                   </article>
                   <article className="coach-layer mechanical">
                     <span className="coach-layer-index">02</span>
                     <div>
-                      <h4>系统机械近似</h4>
-                      {renderLayerBody(coachReview.mechanical_approx, "mechanical_approx", "暂无机械近似说明。")}
+                      <h4>当前行情客观事实</h4>
+                      {renderLayerBody(coachReview.mechanical_approx, "mechanical_approx", "暂无行情客观事实说明。")}
                     </div>
                   </article>
                   <article className="coach-layer interpretation">
@@ -952,7 +1042,7 @@ export default function ReplayWorkbench() {
                 </div>
                 <div className="coach-references">
                   <div className="coach-section-label">
-                    引用页码 / 来源 <span className={`pill ${coachReview.references.length ? "blue" : "ghost"}`}>{coachReview.references.length} 条</span>
+                    📖 阿布课件与原书相关形态图示 <span className={`pill ${coachReview.references.length ? "blue" : "ghost"}`}>{coachReview.references.length} 张原型图</span>
                   </div>
                   {coachReview.references.length ? (
                     <div className="reference-list">
@@ -973,6 +1063,18 @@ export default function ReplayWorkbench() {
                               </small>
                             </div>
                             {ref.content && <p className="reference-quote">{ref.content}</p>}
+                            {ref.image_url && (
+                              <div
+                                className="reference-preview-box"
+                                onClick={() => setLightboxImage(ref.image_url || null)}
+                                title="点击放大查看原版课件/原书高清原图"
+                              >
+                                <img src={ref.image_url} alt={`${ref.book} p.${ref.pdf_page}`} loading="lazy" />
+                                <span className="reference-preview-overlay">
+                                  🔍 点击全屏放大查看阿布课件原版图示 (第 {ref.pdf_page} 页)
+                                </span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -987,12 +1089,90 @@ export default function ReplayWorkbench() {
                   )}
                 </div>
                 <div className="coach-extension">
-                  <div className="coach-section-label">历史相似走势 <span className="pill blue">TOP {analogMatches.length}</span></div>
-                  {analogMatches.length ? <div className="analog-list">{analogMatches.map((match) => <div className="analog-item" key={`${match.start_time}-${match.distance}`}><span><b>{match.date}</b><small>{new Date(match.start_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} — {new Date(match.end_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {match.pattern_label}</small></span><span className="analog-result"><b>{match.forward_direction.toUpperCase()}</b><small>{(match.similarity * 100).toFixed(1)}% 相似</small></span></div>)}</div> : <small>暂无可用历史片段；系统不会展示伪造相似走势。</small>}
+                  <div className="coach-section-label">
+                    📊 过往 SPY 历史相似走势走势图 (严格排除当前训练日) <span className="pill blue">TOP {analogMatches.length}</span>
+                  </div>
+                  {analogMatches.length ? (
+                    <div className="analog-list">
+                      {analogMatches.map((match) => (
+                        <div className="analog-item" key={`${match.start_time}-${match.distance}`}>
+                          <div className="analog-item-header">
+                            <span>
+                              <b>{match.date} (过往历史 SPY)</b>
+                              <small>
+                                {new Date(match.start_time).toLocaleTimeString([], {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })} —{" "}
+                                {new Date(match.end_time).toLocaleTimeString([], {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })} · {match.pattern_label}
+                              </small>
+                            </span>
+                            <span className="analog-result">
+                              <b
+                                className={
+                                  match.forward_direction === "up"
+                                    ? "color-bull"
+                                    : match.forward_direction === "down"
+                                    ? "color-bear"
+                                    : ""
+                                }
+                              >
+                                {match.forward_direction === "up"
+                                  ? "▲ 上涨"
+                                  : match.forward_direction === "down"
+                                  ? "▼ 下跌"
+                                  : "— 震荡"}
+                                {match.forward_return !== null &&
+                                  ` (${(match.forward_return * 100).toFixed(2)}%)`}
+                              </b>
+                              <small>{(match.similarity * 100).toFixed(1)}% 相似</small>
+                            </span>
+                          </div>
+                          {match.chart_image_url && (
+                            <div
+                              className="analog-chart-box"
+                              onClick={() => setLightboxImage(match.chart_image_url || null)}
+                              title="点击全屏查看过往 SPY 高清走势图"
+                            >
+                              <img src={match.chart_image_url} alt="过往 SPY 真实走势图" loading="lazy" />
+                              <span className="reference-preview-overlay">
+                                🔍 点击全屏放大查看过往 SPY K 线走势图与后 10 根演化
+                              </span>
+                            </div>
+                          )}
+                          {(match.window_bars?.length || match.forward_bars?.length) ? (
+                            <MiniCandleChart
+                              windowBars={match.window_bars}
+                              forwardBars={match.forward_bars}
+                            />
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <small>暂无可用历史片段；系统不会展示伪造相似走势。</small>
+                  )}
                 </div>
               </>
             ) : null}
           </section>
+        </div>
+      )}
+
+      {lightboxImage && (
+        <div className="modal-mask lightbox-mask" onClick={() => setLightboxImage(null)}>
+          <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
+            <div className="lightbox-header">
+              <span>📖 Al Brooks 课件与原书图示原型</span>
+              <button className="ghost small" onClick={() => setLightboxImage(null)}>✕ 关闭</button>
+            </div>
+            <div className="lightbox-body">
+              <img src={lightboxImage} alt="课件原图高保真预览" />
+            </div>
+          </div>
         </div>
       )}
 

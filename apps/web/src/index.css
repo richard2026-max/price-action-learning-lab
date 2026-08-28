@@ -1165,6 +1165,15 @@ table.kv td:last-child {
   color: var(--fg-secondary);
   font-weight: 600;
 }
+.date-range-inputs {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.range-sep {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
 .analog-date-filter input[type="date"] {
   background: var(--bg-surface-1);
   border: 1px solid var(--border-default);

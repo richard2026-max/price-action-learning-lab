@@ -283,7 +283,8 @@ export default function ReplayWorkbench() {
   const [reviewCache, setReviewCache] = useState<Record<number, CoachReview>>({});
   const [analogCache, setAnalogCache] = useState<Record<number, AnalogMatch[]>>({});
   const [analogMatches, setAnalogMatches] = useState<AnalogMatch[]>([]);
-  const [analogFilterDate, setAnalogFilterDate] = useState("");
+  const [analogStartDate, setAnalogStartDate] = useState("");
+  const [analogEndDate, setAnalogEndDate] = useState("");
   const [analogLoading, setAnalogLoading] = useState(false);
   const [coachJudgment, setCoachJudgment] = useState<Judgment | null>(null);
   const [coachError, setCoachError] = useState("");
@@ -427,7 +428,8 @@ export default function ReplayWorkbench() {
     setCoachJudgment(judgment);
     setCoachError("");
     setCoachOpen(true);
-    setAnalogFilterDate("");
+    setAnalogStartDate("");
+    setAnalogEndDate("");
 
     const sid = detail.session_id;
     const jid = judgment.id;
@@ -477,12 +479,13 @@ export default function ReplayWorkbench() {
     }
   };
 
-  const handleFetchAnalogsByDate = async (targetDate: string) => {
+  const handleFetchAnalogsByRange = async (start?: string, end?: string) => {
     if (!detail || !coachJudgment) return;
     setAnalogLoading(true);
     try {
       const res = await searchJudgmentAnalogs(detail.session_id, coachJudgment.id, {
-        target_date: targetDate || undefined,
+        start_date: start || undefined,
+        end_date: end || undefined,
       });
       setAnalogMatches(res.matches);
     } catch {
@@ -1201,27 +1204,38 @@ export default function ReplayWorkbench() {
                       📊 过往 SPY 历史相似走势走势图 (严格排除当前训练日) <span className="pill blue">TOP {analogMatches.length}</span>
                     </div>
                     <div className="analog-date-filter">
-                      <span className="filter-hint">限定过往日期：</span>
-                      <input
-                        type="date"
-                        value={analogFilterDate}
-                        onChange={(e) => setAnalogFilterDate(e.target.value)}
-                        placeholder="选择过往日期"
-                        title="输入或选择要限定检索的过往 SPY 交易日 (YYYY-MM-DD)"
-                      />
+                      <span className="filter-hint">限定过往时间段：</span>
+                      <div className="date-range-inputs">
+                        <input
+                          type="date"
+                          value={analogStartDate}
+                          onChange={(e) => setAnalogStartDate(e.target.value)}
+                          placeholder="起始日期"
+                          title="限定历史形态起始日期 (YYYY-MM-DD)"
+                        />
+                        <span className="range-sep">至</span>
+                        <input
+                          type="date"
+                          value={analogEndDate}
+                          onChange={(e) => setAnalogEndDate(e.target.value)}
+                          placeholder="结束日期"
+                          title="限定历史形态结束日期 (YYYY-MM-DD)"
+                        />
+                      </div>
                       <button
                         className="small secondary"
-                        onClick={() => handleFetchAnalogsByDate(analogFilterDate)}
-                        disabled={!analogFilterDate || analogLoading}
+                        onClick={() => handleFetchAnalogsByRange(analogStartDate, analogEndDate)}
+                        disabled={(!analogStartDate && !analogEndDate) || analogLoading}
                       >
-                        {analogLoading ? "检索中…" : "抓取该日形态"}
+                        {analogLoading ? "检索中…" : "抓取该时间段形态"}
                       </button>
-                      {analogFilterDate && (
+                      {(analogStartDate || analogEndDate) && (
                         <button
                           className="small ghost"
                           onClick={() => {
-                            setAnalogFilterDate("");
-                            handleFetchAnalogsByDate("");
+                            setAnalogStartDate("");
+                            setAnalogEndDate("");
+                            handleFetchAnalogsByRange("", "");
                           }}
                           disabled={analogLoading}
                           title="重置为全量过往历史检索"

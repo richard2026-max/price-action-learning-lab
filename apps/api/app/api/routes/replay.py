@@ -75,6 +75,32 @@ def create_session(
         raise _http(e) from None
 
 
+@router.get("/sessions")
+def list_sessions(
+    limit: int = Query(100, ge=1, le=500),
+    svc: ReplayService = Depends(get_replay_service),
+) -> list[dict]:
+    """列出最近的历史训练会话（倒序），供会话管理面板查看与删除。"""
+    repo = svc._repo
+    out: list[dict] = []
+    for orm in repo.list_sessions(limit=limit):
+        judgments = repo.list_judgments(orm.id)
+        out.append(
+            {
+                "session_id": orm.id,
+                "day": orm.day.isoformat(),
+                "provider": orm.provider,
+                "instrument_id": orm.instrument_id,
+                "mode": orm.mode,
+                "state": orm.state,
+                "cursor_index": orm.cursor_index,
+                "judgment_count": len(judgments),
+                "created_at": orm.created_at.isoformat(),
+            }
+        )
+    return out
+
+
 @router.get("/sessions/{session_id}", response_model=SessionDetailOut)
 def get_session(
     session_id: str,

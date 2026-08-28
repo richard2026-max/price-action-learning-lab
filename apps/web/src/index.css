@@ -670,7 +670,50 @@ table.kv td:last-child {
 }
 
 .scan-config {
-  padding: 18px 22px;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.scan-config h3 {
+  margin-bottom: 4px;
+}
+
+.scan-config .row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.scan-config .row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--fg-secondary);
+  white-space: nowrap;
+}
+
+.scan-config .row select {
+  min-width: 130px;
+}
+
+.det-select {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.det-select .chips {
+  gap: 8px;
+}
+
+.det-select .chip {
+  margin: 0;
 }
 
 .scan-body {
@@ -1135,6 +1178,52 @@ table.kv td:last-child {
 }
 .color-bull { color: var(--bull) !important; }
 .color-bear { color: var(--bear) !important; }
+
+/* 历史训练会话管理面板 */
+.sessions-manager {
+  margin-top: 22px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface-1);
+}
+.sessions-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+.sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.session-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+.session-item b { display: block; font-size: 12.5px; color: var(--fg-primary); }
+.session-item small { display: block; margin-top: 3px; color: var(--fg-muted); font-size: 10.5px; }
+.session-actions { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.session-delete-btn {
+  color: var(--bear);
+  border-color: rgba(239, 83, 80, 0.35);
+}
+.session-delete-btn:hover {
+  background: rgba(239, 83, 80, 0.15);
+  border-color: var(--bear);
+}
+
 .coach-paragraphs { display: flex; flex-direction: column; gap: 8px; }
 .coach-paragraphs p { color: var(--fg-secondary); font-size: 12.5px; line-height: 1.65; margin: 0; white-space: pre-wrap; }
 .coach-empty-text { color: var(--fg-muted) !important; font-style: italic; margin: 0; }

@@ -50,6 +50,16 @@ class ReplayRepository:
                 s.expunge(orm)
             return orm
 
+    def list_sessions(self, limit: int = 100) -> list[ReplaySessionORM]:
+        """列出最近的回放会话（倒序），供前端会话管理面板展示。"""
+        with self._factory() as s:
+            rows = s.scalars(
+                select(ReplaySessionORM).order_by(ReplaySessionORM.created_at.desc()).limit(limit)
+            ).all()
+            for r in rows:
+                s.expunge(r)
+            return list(rows)
+
     def update(self, orm: ReplaySessionORM) -> None:
         with self._factory() as s:
             s.merge(orm)

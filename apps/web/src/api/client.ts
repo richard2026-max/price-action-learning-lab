@@ -189,6 +189,21 @@ export const submitJudgment = (id: string, provider: Provider, payload: Judgment
 export const listJudgments = (id: string, provider: Provider) =>
   fetch(`${BASE}/replay/sessions/${id}/judgments?${q(provider)}`).then((r) => j<Judgment[]>(r));
 
+export interface ReplaySessionSummary {
+  session_id: string;
+  day: string;
+  provider: string;
+  instrument_id: string;
+  mode: string;
+  state: string;
+  cursor_index: number;
+  judgment_count: number;
+  created_at: string;
+}
+
+export const listSessions = (limit = 100) =>
+  fetch(`${BASE}/replay/sessions?limit=${limit}`).then((r) => j<ReplaySessionSummary[]>(r));
+
 export const deleteJudgment = (sessionId: string, judgmentId: number, provider: Provider) =>
   fetch(`${BASE}/replay/sessions/${sessionId}/judgments/${judgmentId}?${q(provider)}`, {
     method: "DELETE",

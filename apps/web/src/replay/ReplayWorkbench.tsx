@@ -14,6 +14,7 @@ import {
   goBack,
   listDays,
   listJudgments,
+  listSessions,
   deleteJudgment,
   deleteSession,
   listSessionTrades,
@@ -31,6 +32,7 @@ import {
   type Judgment,
   type JudgmentPayload,
   type Provider,
+  type ReplaySessionSummary,
   type SessionDetail,
   type SimTrade,
 } from "../api/client";
@@ -252,6 +254,95 @@ function storeAnalogs(sessionId: string, judgmentId: number, analogs: AnalogMatc
   } catch {
     /* ignore */
   }
+}
+
+const MODE_ZH: Record<string, string> = {
+  free: "自由训练",
+  hidden_answer: "严格训练",
+  exam: "封存盲测",
+};
+
+function SessionsManager({
+  onResume,
+}: {
+  onResume: (sessionId: string, provider: Provider, day: string) => void | Promise<void>;
+}) {
+  const [sessions, setSessions] = useState<ReplaySessionSummary[]>([]);
+  const [expanded, setExpanded] = useState(false);
+
+  const load = useCallback(() => {
+    listSessions(100)
+      .then(setSessions)
+      .catch(() => setSessions([]));
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleDelete = async (sid: string) => {
+    if (!window.confirm("确定彻底删除该历史训练会话吗？\n其全部判断记录、模拟交易与笔记将被级联清空。")) return;
+    try {
+      const target = sessions.find((s) => s.session_id === sid);
+      await deleteSession(sid, (target?.provider as Provider) ?? "synthetic");
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.includes(sid)) localStorage.removeItem(k);
+      }
+      setSessions((prev) => prev.filter((s) => s.session_id !== sid));
+    } catch (e) {
+      alert(`删除失败：${e}`);
+    }
+  };
+
+  return (
+    <div className="sessions-manager">
+      <div className="sessions-header" onClick={() => setExpanded((v) => !v)}>
+        <span className="coach-section-label">
+          🗂️ 历史训练会话管理 <span className="pill blue">{sessions.length}</span>
+        </span>
+        <span className="hint">{expanded ? "收起 ▲" : "展开查看与删除 ▼"}</span>
+      </div>
+      {expanded && (
+        <div className="sessions-list">
+          {sessions.length === 0 ? (
+            <p className="hint">暂无历史训练会话记录。</p>
+          ) : (
+            sessions.map((s) => (
+              <div key={s.session_id} className="session-item">
+                <div className="session-info">
+                  <b>
+                    {s.day} · {MODE_ZH[s.mode] ?? s.mode}
+                  </b>
+                  <small>
+                    {s.provider} · {s.judgment_count} 条判断 · 进度第 {s.cursor_index + 1} 根 ·{" "}
+                    {s.state === "completed" ? "已完成" : "进行中"} ·{" "}
+                    {new Date(s.created_at).toLocaleString()}
+                  </small>
+                </div>
+                <div className="session-actions">
+                  <button
+                    className="small secondary"
+                    onClick={() => onResume(s.session_id, s.provider as Provider, s.day)}
+                    title="恢复并继续该历史训练会话"
+                  >
+                    ↩ 恢复训练
+                  </button>
+                  <button
+                    className="small ghost session-delete-btn"
+                    onClick={() => handleDelete(s.session_id)}
+                    title="彻底删除该会话（级联清空全部关联数据）"
+                  >
+                    🗑️ 删除
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function ReplayWorkbench() {
@@ -724,7 +815,6 @@ export default function ReplayWorkbench() {
               <option value="exam">封存盲测考试 (随机封存集样本)</option>
             </select>
           </div>
-
           <div className="form-group">
             <label>选择指定交易日</label>
             <select value={day} onChange={(e) => setDay(e.target.value)}>
@@ -768,6 +858,23 @@ export default function ReplayWorkbench() {
         </div>
 
         {msg && <p className="err" style={{ marginTop: 14 }}>{msg}</p>}
+
+        <SessionsManager
+          onResume={async (sid, prov, d) => {
+            try {
+              const det = await getSession(sid, prov);
+              apply(det);
+              setDay(d);
+              setProvider(prov);
+              setMode((det.info as { mode?: string }).mode === "exam" ? "exam" : (det.info as { mode?: string }).mode === "hidden_answer" ? "hidden_answer" : "free");
+              refreshData(sid, prov);
+              setMsg("已恢复历史训练会话 ✓");
+              setTimeout(() => setMsg(""), 3000);
+            } catch (e) {
+              setMsg(`恢复会话失败：${e}`);
+            }
+          }}
+        />
       </div>
     );
   }

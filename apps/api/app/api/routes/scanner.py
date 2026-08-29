@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.api.deps import get_scanner_service, resolve_instrument
+from app.api.deps import get_current_user, get_scanner_service, resolve_instrument
+from app.models.orm import UserORM
 from app.schemas.scanner import (
     CandidateRecordOut,
     CreateScanTaskIn,
@@ -20,23 +21,31 @@ router = APIRouter(prefix="/scan", tags=["scanner"])
 def create_task(
     req: CreateScanTaskIn,
     svc: ScannerService = Depends(get_scanner_service),
+    user: UserORM = Depends(get_current_user),
 ) -> ScanTaskOut:
     instrument = resolve_instrument(req.instrument_id, req.provider)
     try:
-        orm = svc.create_and_run_task(req, instrument)
+        orm = svc.create_and_run_task(req, instrument, user.id)
         return ScanTaskOut.model_validate(orm, from_attributes=True)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/tasks", response_model=list[ScanTaskOut])
-def list_tasks(svc: ScannerService = Depends(get_scanner_service)) -> list[ScanTaskOut]:
-    return [ScanTaskOut.model_validate(t, from_attributes=True) for t in svc.list_tasks()]
+def list_tasks(
+    svc: ScannerService = Depends(get_scanner_service),
+    user: UserORM = Depends(get_current_user),
+) -> list[ScanTaskOut]:
+    return [ScanTaskOut.model_validate(t, from_attributes=True) for t in svc.list_tasks(user.id)]
 
 
 @router.get("/tasks/{task_id}", response_model=ScanTaskOut)
-def get_task(task_id: str, svc: ScannerService = Depends(get_scanner_service)) -> ScanTaskOut:
-    t = svc.get_task(task_id)
+def get_task(
+    task_id: str,
+    svc: ScannerService = Depends(get_scanner_service),
+    user: UserORM = Depends(get_current_user),
+) -> ScanTaskOut:
+    t = svc.get_task(task_id, user.id)
     if not t:
         raise HTTPException(status_code=404, detail="扫描任务不存在")
     return ScanTaskOut.model_validate(t, from_attributes=True)
@@ -51,6 +60,7 @@ def list_candidates(
     only_mistakes: bool = Query(False),
     limit: int = Query(200, ge=1, le=1000),
     svc: ScannerService = Depends(get_scanner_service),
+    user: UserORM = Depends(get_current_user),
 ) -> list[CandidateRecordOut]:
     rows = svc.list_candidates(
         task_id=task_id,
@@ -59,6 +69,7 @@ def list_candidates(
         only_favorites=only_favorites,
         only_mistakes=only_mistakes,
         limit=limit,
+        user_id=user.id,
     )
     return [CandidateRecordOut.model_validate(r, from_attributes=True) for r in rows]
 
@@ -68,8 +79,9 @@ def review_candidate(
     candidate_id: str,
     req: ReviewCandidateIn,
     svc: ScannerService = Depends(get_scanner_service),
+    user: UserORM = Depends(get_current_user),
 ) -> CandidateRecordOut:
-    updated = svc.review_candidate(candidate_id, req)
+    updated = svc.review_candidate(candidate_id, req, user.id)
     if not updated:
         raise HTTPException(status_code=404, detail="候选记录不存在")
     return CandidateRecordOut.model_validate(updated, from_attributes=True)

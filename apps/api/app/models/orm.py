@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -16,10 +16,23 @@ class Base(DeclarativeBase):
     pass
 
 
+class UserORM(Base):
+    __tablename__ = "users"
+    __table_args__ = (UniqueConstraint("provider", "subject", name="uq_users_provider_subject"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(16))
+    subject: Mapped[str] = mapped_column(String(128))
+    display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
 class ReplaySessionORM(Base):
     __tablename__ = "replay_sessions"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)  # uuid4 hex
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
     instrument_id: Mapped[str] = mapped_column(String(16))
     provider: Mapped[str] = mapped_column(String(16))
     day: Mapped[date] = mapped_column(Date)
@@ -28,21 +41,38 @@ class ReplaySessionORM(Base):
     sampling_mode: Mapped[str] = mapped_column(String(24), default="user_initiated")
     warmup_bars: Mapped[int] = mapped_column(Integer, default=6)
     cursor_index: Mapped[int] = mapped_column(Integer, default=0)
+    cursor_version: Mapped[int] = mapped_column(Integer, default=0)
     state: Mapped[str] = mapped_column(String(16), default="running")  # running|completed
     seed: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
 
+class ReplayAdvanceRequestORM(Base):
+    __tablename__ = "replay_advance_requests"
+    __table_args__ = (UniqueConstraint("session_id", "request_id", name="uq_replay_advance_request"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("replay_sessions.id", ondelete="CASCADE"), index=True)
+    request_id: Mapped[str] = mapped_column(String(128))
+    requested_n: Mapped[int] = mapped_column(Integer)
+    expected_cursor_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    result_cursor_index: Mapped[int] = mapped_column(Integer)
+    result_cursor_version: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class JudgmentORM(Base):
     """Predict First 判断。提交即锁定（无更新接口）；bar_index = 提交时服务端 cursor。"""
 
     __tablename__ = "judgments"
+    __table_args__ = (UniqueConstraint("session_id", "client_request_id", name="uq_judgment_request"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(ForeignKey("replay_sessions.id", ondelete="CASCADE"))
     bar_index: Mapped[int] = mapped_column(Integer)
     bar_time_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    client_request_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     payload: Mapped[dict] = mapped_column(JSON)
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
@@ -67,6 +97,7 @@ class ScanTaskORM(Base):
     __tablename__ = "scan_tasks"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)  # uuid4 hex
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
     instrument_id: Mapped[str] = mapped_column(String(16))
     provider: Mapped[str] = mapped_column(String(16))
     timeframe: Mapped[str] = mapped_column(String(4), default="5m")

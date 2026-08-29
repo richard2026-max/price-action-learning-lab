@@ -1,0 +1,28 @@
+.predict-mask { position: fixed; inset: 0; z-index: 20; display: flex; align-items: flex-end; background: rgba(2, 5, 8, .78); backdrop-filter: blur(8px); }
+.predict-sheet { width: 100%; height: 91vh; padding: 28px; color: var(--text); background: #0c1117; border-top: 2px solid var(--acid); box-shadow: 0 -30px 90px rgba(0,0,0,.55); }
+.predict-header { display: flex; justify-content: space-between; align-items: flex-start; }
+.predict-title { display: block; margin-top: 5px; font-size: 36px; font-weight: 800; }
+.close { width: 58px; height: 58px; color: var(--muted); font-size: 52px; line-height: 48px; text-align: center; }
+.step-track { display: grid; grid-template-columns: repeat(4, 1fr); margin: 26px 0 18px; border: 1px solid var(--line); }
+.step { display: flex; gap: 8px; justify-content: center; padding: 13px 4px; color: #58636f; font-size: 19px; border-right: 1px solid var(--line); }
+.step:last-child { border-right: 0; }
+.step.active { color: #101500; background: var(--acid); }
+.predict-body { height: calc(91vh - 330px); }
+.field { margin-bottom: 34px; }
+.field-label { display: block; margin-bottom: 16px; color: #aeb7c1; font-size: 21px; letter-spacing: 2px; }
+.chips { display: flex; flex-wrap: wrap; gap: 12px; }
+.chip { min-width: 150px; padding: 18px 22px; color: #8d98a4; text-align: center; font-size: 23px; border: 1px solid #2a3540; background: #10171f; }
+.chip.selected { color: var(--acid); border-color: var(--acid); background: rgba(215,255,63,.08); box-shadow: inset 0 -3px var(--acid); }
+.terminal-input { width: 100%; height: 76px; padding: 0 18px; color: var(--text); font-size: 25px; border: 1px solid #2b3743; background: #080c11; }
+.textarea { height: 170px; padding-top: 18px; line-height: 1.5; }
+.textarea.short { height: 130px; }
+.reason-second { margin-top: 12px; }
+.price-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.price-input > text { display: block; min-height: 42px; color: var(--muted); font-size: 17px; letter-spacing: 1px; }
+.price-input .terminal-input { padding: 0 10px; text-align: center; }
+.lock-note { display: flex; gap: 16px; padding: 22px; color: #9aa5af; font-size: 22px; line-height: 1.55; border: 1px dashed #3a4650; background: rgba(255,189,74,.04); }
+.lock-mark { height: 36px; padding: 3px 8px; color: #151000; font-size: 16px; font-weight: 900; background: var(--amber); }
+.form-error { height: 42px; color: var(--down); font-size: 20px; padding-top: 8px; }
+.predict-actions { display: flex; gap: 14px; }
+.back-button { width: 32%; }
+.next-button { flex: 1; }

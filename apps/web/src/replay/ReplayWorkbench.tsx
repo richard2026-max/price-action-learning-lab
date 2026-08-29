@@ -3,7 +3,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import CandleChart, { type ChartMarker } from "../chart/CandleChart";
+import CandleChart, { type ChartMarker, type ChartOverlays, type TradeLine } from "../chart/CandleChart";
 import JudgmentForm from "./JudgmentForm";
 import {
   addAnnotation,
@@ -383,15 +383,74 @@ export default function ReplayWorkbench() {
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [showMarkers, setShowMarkers] = useState(true);
+  const [overlays, setOverlays] = useState<ChartOverlays>(() => {
+    try {
+      const raw = localStorage.getItem("pall.chartOverlays");
+      if (raw)
+        return {
+          ema5: true,
+          ema15: true,
+          ema60: true,
+          keyLevels: true,
+          positions: true,
+          ...JSON.parse(raw),
+        };
+    } catch {
+      /* ignore */
+    }
+    return { ema5: true, ema15: true, ema60: true, keyLevels: true, positions: true };
+  });
+  const [overlaysOpen, setOverlaysOpen] = useState(false);
   const advLock = useRef(false);
+  const msgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("pall.chartOverlays", JSON.stringify(overlays));
+    } catch {
+      /* ignore */
+    }
+  }, [overlays]);
+
+  // 全局消息统一自动消失：错误 8 秒、普通提示 3 秒（由 setMsg 的既有时序控制），兜底防止永久残留
+  useEffect(() => {
+    if (!msg) return;
+    if (msgTimer.current) clearTimeout(msgTimer.current);
+    const isError = /失败|错误|Error|不可用|必须|请填/.test(msg);
+    msgTimer.current = setTimeout(() => setMsg(""), isError ? 12000 : 3000);
+    return () => {
+      if (msgTimer.current) clearTimeout(msgTimer.current);
+    };
+  }, [msg]);
 
   useEffect(() => {
     listDays(provider).then(setDays).catch((e) => setMsg(`获取日期失败：${e}`));
   }, [provider]);
 
-  const refreshData = useCallback((sid: string, p: Provider) => {
-    listJudgments(sid, p).then(setJudgments).catch(() => setJudgments([]));
-    listSessionTrades(sid).then(setTrades).catch(() => setTrades([]));
+  const [tradesError, setTradesError] = useState("");
+  const lastRefreshAt = useRef(0);
+
+  const refreshData = useCallback((sid: string, p: Provider, force = false) => {
+    // 播放时每根K线都会推进，这里节流到 ≥3s 一次；下单/平仓/提交判断等主动操作用 force 立即刷新
+    const now = Date.now();
+    if (!force && now - lastRefreshAt.current < 3000) return;
+    lastRefreshAt.current = now;
+    // 后台刷新失败绝不弹全局提示（否则播放时提示反复出现），只在仓位卡内联显示并可手动重试
+    listJudgments(sid, p)
+      .then((rows) => {
+        setJudgments(rows);
+      })
+      .catch(() => {
+        /* 判断列表失败静默保留旧数据：数据源瞬时不可用时下轮推进自动重试 */
+      });
+    listSessionTrades(sid, p)
+      .then((rows) => {
+        setTrades(rows);
+        setTradesError("");
+      })
+      .catch((e) => {
+        setTradesError(`仓位列表加载失败：${e}`);
+      });
   }, []);
 
   const apply = useCallback((d: SessionDetail) => {
@@ -591,7 +650,7 @@ export default function ReplayWorkbench() {
     const prov = curProvider(detail);
     await submitJudgment(detail.session_id, prov, p);
     setJudgmentOpen(false);
-    refreshData(detail.session_id, prov);
+    refreshData(detail.session_id, prov, true);
     try {
       apply(await getSession(detail.session_id, prov));
     } catch {
@@ -679,6 +738,19 @@ export default function ReplayWorkbench() {
       setMsg("请填写完整的计划价格");
       return;
     }
+    if (![e, s, t].every((v) => Number.isFinite(v) && v > 0)) {
+      setMsg("价格必须是有效的正数");
+      return;
+    }
+    // 前端预校验价格次序，避免整坨后端 JSON 报错（多头：止损<入场<目标；空头：目标<入场<止损）
+    if (tradeSide === "long" && !(s < e && e < t)) {
+      setMsg("做多订单需满足：止损位 < 计划入场 < 目标位（当前止损应低于入场、目标高于入场）");
+      return;
+    }
+    if (tradeSide === "short" && !(t < e && e < s)) {
+      setMsg("做空订单需满足：目标位 < 计划入场 < 止损位（当前目标应低于入场、止损高于入场）");
+      return;
+    }
     setBusy(true);
     try {
       await createSimTrade(detail.session_id, prov, {
@@ -691,7 +763,7 @@ export default function ReplayWorkbench() {
       });
       setTradeFormOpen(false);
       setTradeNotes("");
-      refreshData(detail.session_id, prov);
+      refreshData(detail.session_id, prov, true);
       setMsg("模拟交易订单已下达 🎯");
       setTimeout(() => setMsg(""), 2500);
     } catch (err) {
@@ -706,7 +778,7 @@ export default function ReplayWorkbench() {
     const prov = curProvider(detail);
     try {
       await manualExitTrade(tradeId, detail.session_id, prov, "手动平仓");
-      refreshData(detail.session_id, prov);
+      refreshData(detail.session_id, prov, true);
       setMsg("已平仓离场 ✓");
       setTimeout(() => setMsg(""), 2000);
     } catch (err) {
@@ -733,6 +805,44 @@ export default function ReplayWorkbench() {
   const lastBar = useMemo(() => detail?.bars[detail.bars.length - 1] ?? null, [detail]);
   const candidates = detail?.candidates ?? [];
   const unlocked = candidates.length > 0;
+
+  // 模拟持仓可视化：开放仓位在图上画 入场(蓝)/止损(红)/目标(绿) 三条价格线
+  const tradeLines = useMemo<TradeLine[]>(() => {
+    if (!detail) return [];
+    return trades
+      .filter((t) => t.status === "open" || t.status === "pending")
+      .flatMap((t): TradeLine[] => {
+        const entry = t.actual_entry_price ?? t.planned_entry_price;
+        const sideTag = t.side === "long" ? "多" : "空";
+        return [
+          { price: entry, color: "#4da3ff", title: `入场 ${sideTag}` },
+          { price: t.stop_price, color: "#ef5350", title: "止损" },
+          { price: t.target_price, color: "#26a69a", title: "目标" },
+        ];
+      });
+  }, [detail, trades]);
+
+  // 开放仓位的浮动盈亏（R 倍数）与距止损/目标距离
+  const openPositions = useMemo(() => {
+    const cur = lastBar?.close ?? null;
+    return trades
+      .filter((t) => t.status === "open" || t.status === "pending")
+      .map((t) => {
+        const entry = t.actual_entry_price ?? t.planned_entry_price;
+        const risk = t.initial_risk || Math.abs(entry - t.stop_price) || 1;
+        const curPrice = cur ?? entry;
+        const floatingR =
+          t.side === "long" ? (curPrice - entry) / risk : (entry - curPrice) / risk;
+        return {
+          trade: t,
+          entry,
+          curPrice,
+          floatingR: Math.round(floatingR * 100) / 100,
+          distToStop: Math.abs(curPrice - t.stop_price),
+          distToTarget: Math.abs(t.target_price - curPrice),
+        };
+      });
+  }, [trades, lastBar]);
   const curCands = useMemo(
     () => candidates.filter((c) => c.bar_index === (detail?.info.bar_index ?? -1)),
     [candidates, detail?.info.bar_index],
@@ -944,7 +1054,52 @@ export default function ReplayWorkbench() {
         </div>
 
         <div className="chart-area">
-          <CandleChart bars={detail.bars} ema20={detail.ema20} keyLevels={kl} markers={chartMarkers} />
+          <div className="overlay-toolbar">
+            <button
+              className={`small ghost overlay-toggle-btn ${overlaysOpen ? "active" : ""}`}
+              onClick={() => setOverlaysOpen((v) => !v)}
+              title="选择图表上显示的指标与图层"
+            >
+              ⚙️ 指标图层
+            </button>
+            {overlaysOpen && (
+              <div className="overlay-panel">
+                <div className="overlay-panel-title">图表图层显示开关</div>
+                {(
+                  [
+                    ["ema5", "EMA20 · 5 分钟（基准均线）", "#f0b90b"],
+                    ["ema15", "EMA20 · 15 分钟（Brooks 近似）", "#4da3ff"],
+                    ["ema60", "EMA20 · 60 分钟（Brooks 近似）", "#9a86c9"],
+                    ["keyLevels", "关键价位线（PDO/PDH/PDL/PDC/OPEN/盘前）", "#c98a4b"],
+                    ["positions", "模拟持仓线（入场/止损/目标）", "#26a69a"],
+                    ["markers", "形态识别标记（SH/SL/MC/Wedge…）", "#26a69a"],
+                  ] as Array<[keyof ChartOverlays | "markers", string, string]>
+                ).map(([key, label, color]) => {
+                  const checked = key === "markers" ? showMarkers : overlays[key];
+                  const onToggle = (v: boolean) =>
+                    key === "markers" ? setShowMarkers(v) : setOverlays((prev) => ({ ...prev, [key]: v }));
+                  return (
+                    <label key={key} className="overlay-item">
+                      <input type="checkbox" checked={checked} onChange={(e) => onToggle(e.target.checked)} />
+                      <span className="overlay-color" style={{ background: color }} />
+                      {label}
+                    </label>
+                  );
+                })}
+                <div className="overlay-panel-hint">设置自动保存在本机浏览器，刷新后保持。</div>
+              </div>
+            )}
+          </div>
+          <CandleChart
+            bars={detail.bars}
+            ema20={detail.ema20}
+            ema15={detail.ema15}
+            ema60={detail.ema60}
+            keyLevels={kl}
+            markers={chartMarkers}
+            overlays={overlays}
+            tradeLines={tradeLines}
+          />
         </div>
 
         <div className="statusbar">
@@ -983,37 +1138,96 @@ export default function ReplayWorkbench() {
           </table>
         </div>
 
-        {/* 模拟交易持仓卡片 */}
+        {/* 仓位管理 · 模拟持仓卡片 */}
         <div className="sidebar-card">
           <h4>
-            <span>模拟持仓与出场 (Sim Trades: {trades.length})</span>
-            <span className="pill blue">Level 6</span>
+            <span>仓位管理 · 模拟持仓</span>
+            <span className={`pill ${openPositions.length ? "primary" : "ghost"}`}>
+              持仓 {openPositions.length} / 历史 {trades.length}
+            </span>
           </h4>
-          {trades.length === 0 ? (
-            <p className="hint" style={{ padding: "6px 0" }}>按 <b>T</b> 或点击工具栏下单按钮开立模拟头寸。</p>
+          {tradesError && (
+            <div className="position-error">
+              <span>⚠️ {tradesError}</span>
+              {detail && (
+                <button
+                  className="small ghost"
+                  onClick={() => refreshData(detail.session_id, curProvider(detail), true)}
+                >
+                  立即重试
+                </button>
+              )}
+            </div>
+          )}
+          {trades.length === 0 && !tradesError ? (
+            <p className="hint" style={{ padding: "6px 0" }}>
+              按 <b>T</b> 或点击工具栏「🎯 模拟下单」开立头寸。下单后入场/止损/目标会自动画在图表上。
+            </p>
           ) : (
             <div className="jlist">
-              {trades.map((t) => (
-                <div key={t.id} className="jitem">
+              {openPositions.length === 0 && (
+                <p className="hint" style={{ padding: "4px 0" }}>
+                  当前无开放仓位。以下为已了结的历史交易：
+                </p>
+              )}
+              {openPositions.map(({ trade: t, entry, curPrice, floatingR, distToStop, distToTarget }) => (
+                <div key={t.id} className="jitem position-item">
                   <div className="jitem-header">
                     <span className="jitem-title">
-                      {t.side === "long" ? "🟢 BUY 多" : "🔴 SELL 空"} @ {t.actual_entry_price ?? t.planned_entry_price}
+                      {t.side === "long" ? "🟢 多头持仓" : "🔴 空头持仓"} @ {entry}
                     </span>
-                    <span className={`pill small ${t.status === "closed" ? (t.pnl && t.pnl > 0 ? "ok" : "bad") : "primary"}`}>
-                      {t.status === "closed" ? `${t.exit_reason}: ${t.pnl_in_r}R` : t.status.toUpperCase()}
+                    <span className={`pill small ${floatingR >= 0 ? "ok" : "bad"}`}>
+                      {floatingR >= 0 ? "+" : ""}
+                      {floatingR.toFixed(2)}R
                     </span>
                   </div>
-                  <div className="hint" style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>
-                    S: {t.stop_price} | T: {t.target_price} | R: {t.initial_risk}
+                  <table className="kv position-kv">
+                    <tbody>
+                      <tr>
+                        <td>现价</td>
+                        <td><b>{curPrice}</b></td>
+                      </tr>
+                      <tr>
+                        <td className="stop-cell">止损 {t.stop_price}</td>
+                        <td>还差 <b>{distToStop.toFixed(2)}</b> 点触发</td>
+                      </tr>
+                      <tr>
+                        <td className="target-cell">目标 {t.target_price}</td>
+                        <td>还差 <b>{distToTarget.toFixed(2)}</b> 点到达</td>
+                      </tr>
+                      <tr>
+                        <td>风险基数 R</td>
+                        <td>{t.initial_risk}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <div className="hint" style={{ marginTop: 2, fontSize: 10.5 }}>
+                    MFE +{t.mfe_in_r ?? 0}R / MAE {t.mae_in_r ?? 0}R（随推进自动更新）
                   </div>
-                  {t.status === "open" && (
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
-                      <span className="hint">MFE: +{t.mfe_in_r}R / MAE: {t.mae_in_r}R</span>
-                      <button className="small ghost" onClick={() => handleManualExit(t.id)}>平仓</button>
-                    </div>
-                  )}
+                  <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                    <button className="small ghost" onClick={() => handleManualExit(t.id)}>
+                      ✋ 市价平仓
+                    </button>
+                    <span className="hint" style={{ alignSelf: "center" }}>
+                      或等待 K 线推进自动触发止损/止盈
+                    </span>
+                  </div>
                 </div>
               ))}
+              {trades
+                .filter((t) => t.status === "closed")
+                .map((t) => (
+                  <div key={t.id} className="jitem">
+                    <div className="jitem-header">
+                      <span className="jitem-title">
+                        {t.side === "long" ? "🟢 多" : "🔴 空"} @ {t.actual_entry_price ?? t.planned_entry_price} → {t.exit_price}
+                      </span>
+                      <span className={`pill small ${t.pnl && t.pnl > 0 ? "ok" : "bad"}`}>
+                        {t.exit_reason}: {t.pnl_in_r}R
+                      </span>
+                    </div>
+                  </div>
+                ))}
             </div>
           )}
         </div>
@@ -1051,10 +1265,9 @@ export default function ReplayWorkbench() {
                 {patternCount.wedge ? ` · 楔形 ${patternCount.wedge}` : ""}
                 {patternCount.climax ? ` · 高潮 ${patternCount.climax}` : ""}
               </div>
-              <label className="hint" style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
-                <input type="checkbox" checked={showMarkers} onChange={(e) => setShowMarkers(e.target.checked)} />
-                在 K 线图上叠加几何与形态标记
-              </label>
+              <div className="hint" style={{ marginTop: 6 }}>
+                形态标记可通过图表左上角「⚙️ 指标图层」自主显示/隐藏。
+              </div>
             </>
           )}
         </div>
@@ -1438,24 +1651,44 @@ export default function ReplayWorkbench() {
 
       {noteOpen && (
         <div className="modal-mask" onClick={() => setNoteOpen(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 640 }}>
-            <h3>📝 添加 K 线笔记 (第 {detail.info.bar_index + 1} 根)</h3>
+          <div className="modal note-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="note-modal-header">
+              <h3>📝 K 线笔记</h3>
+              <span className="note-modal-meta">
+                第 <b>{detail.info.bar_index + 1}</b> 根 ·{" "}
+                {fmtET(detail.info.market_time_utc)} ET · 现价{" "}
+                <b>{lastBar?.close ?? "—"}</b>
+              </span>
+            </div>
             <textarea
-              rows={6}
+              className="note-textarea"
+              rows={8}
               autoFocus
               value={noteText}
               onChange={(e) => setNoteText(e.target.value)}
-              placeholder="记录当前读图心得，例如：此处回调至 EMA20 上方出现多头信号棒，但上方前高存在明显阻力..."
+              placeholder={"记录当前读图心得，例如：\n· 此处回调至 EMA20 上方出现多头信号棒\n· 但上方前高存在明显阻力，等待二次突破确认\n· 若跌破前低则多头论调失效"}
             />
-            <div className="actions">
-              <button className="ghost" onClick={() => setNoteOpen(false)}>取消</button>
-              <button className="primary" onClick={onSaveNote}>保存笔记</button>
+            <div className="note-modal-footer">
+              <span className="hint">{noteText.length} 字 · 保存后可在复盘与错题本中回看</span>
+              <div className="actions" style={{ margin: 0 }}>
+                <button className="ghost" onClick={() => setNoteOpen(false)}>取消</button>
+                <button className="primary" onClick={onSaveNote} disabled={!noteText.trim()}>
+                  保存笔记
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {msg && <div className="msg">{msg}</div>}
+      {msg && (
+        <div className={`msg ${/失败|错误|Error|不可用/.test(msg) ? "msg-error" : ""}`}>
+          <span className="msg-text">{msg}</span>
+          <button className="msg-close" onClick={() => setMsg("")} aria-label="关闭提示">
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   );
 }

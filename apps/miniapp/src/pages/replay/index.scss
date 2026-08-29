@@ -1,0 +1,18 @@
+.replay-screen { padding-top: 20px; }
+.replay-top { display: flex; justify-content: space-between; align-items: flex-start; }
+.replay-day { display: block; margin-top: 8px; font-size: 28px; font-weight: 700; }
+.live-badge { padding: 10px 14px; color: var(--up); font-size: 18px; letter-spacing: 1px; border: 1px solid rgba(65,226,160,.35); background: rgba(65,226,160,.06); }
+.live-dot { display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: var(--up); }
+.tape-row { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 14px; padding: 17px 4px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.tape-row > view { padding-left: 18px; border-left: 1px solid var(--line); }
+.tape-row > view:first-child { border: 0; }
+.tape-row .section-label { display: block; margin-bottom: 5px; font-size: 16px; }
+.tape-row .mono { font-size: 22px; }
+.discipline { display: flex; justify-content: space-between; align-items: center; margin-top: 24px; padding: 24px; }
+.discipline.locked::before { background: var(--up); }
+.gate-title { display: block; margin-top: 8px; font-size: 27px; font-weight: 800; }
+.gate-code { color: var(--amber); font-size: 17px; }
+.locked .gate-code { color: var(--up); }
+.decision-button { margin-top: 18px; }
+.advance-grid { display: grid; grid-template-columns: .8fr 1.2fr; gap: 14px; margin-top: 18px; }
+.replay-footnote { display: block; margin-top: 20px; color: #5f6a75; font-size: 19px; line-height: 1.5; text-align: center; }

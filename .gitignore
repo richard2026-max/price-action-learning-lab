@@ -13,6 +13,13 @@ __pycache__/
 # Node
 node_modules/
 dist/
+coverage/
+*.tsbuildinfo
+
+# 微信小程序私有配置与上传密钥
+project.private.config.json
+private.*.key
+*.upload.key
 
 # 本地数据（行情/数据库/知识资料不入库；结构由代码生成）
 data/market/

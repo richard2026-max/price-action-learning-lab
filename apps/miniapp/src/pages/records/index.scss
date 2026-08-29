@@ -1,0 +1,12 @@
+.records-screen { padding-top: 32px; }
+.ledger-head { display: grid; grid-template-columns: 1fr 100px 90px; margin-top: 44px; padding: 14px 0 12px 58px; color: var(--muted); font-size: 16px; border-bottom: 1px solid var(--line); }
+.ledger-list { border-bottom: 1px solid var(--line); }
+.ledger-row { display: grid; grid-template-columns: 42px 1fr 84px 78px; align-items: center; min-height: 112px; border-top: 1px solid #202a34; }
+.row-index { color: #4d5863; font-size: 17px; }
+.row-date { display: block; font-size: 24px; font-weight: 700; }
+.row-meta { display: block; margin-top: 7px; color: var(--muted); font-size: 18px; }
+.row-cursor { font-size: 20px; }
+.row-state { padding: 6px; color: var(--amber); font-size: 16px; text-align: center; border: 1px solid rgba(255,189,74,.35); }
+.row-state.done { color: var(--up); border-color: rgba(65,226,160,.35); }
+.empty { margin-top: 28px; padding: 50px 30px; color: var(--muted); font-size: 22px; line-height: 1.6; text-align: center; }
+.empty-code { display: block; margin-bottom: 12px; color: var(--acid); font-size: 19px; }

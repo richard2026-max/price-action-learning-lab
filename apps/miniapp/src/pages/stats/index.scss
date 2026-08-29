@@ -1,0 +1,18 @@
+.stats-screen { padding-top: 32px; }
+.stats-hero { display: grid; grid-template-columns: 1fr 150px; align-items: center; margin-top: 34px; padding: 30px; }
+.big-number { display: block; margin-top: 8px; font-size: 76px; font-weight: 800; letter-spacing: -4px; }
+.completion-ring { width: 132px; height: 132px; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 10px solid #26313c; border-top-color: var(--acid); border-right-color: var(--acid); border-radius: 50%; }
+.completion-ring .mono { font-size: 27px; font-weight: 800; }
+.completion-ring > text:last-child { color: var(--muted); font-size: 16px; }
+.metric-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 12px; }
+.metric-card { padding: 24px; border: 1px solid var(--line); background: #0f151d; }
+.metric-number { display: block; margin-top: 12px; font-size: 42px; font-weight: 800; }
+.metric-caption { color: var(--muted); font-size: 16px; letter-spacing: 2px; }
+.distribution { margin-top: 24px; padding: 28px; }
+.bar-row { display: grid; grid-template-columns: 112px 1fr 34px; gap: 12px; align-items: center; margin-top: 24px; }
+.bar-name { color: #b1bbc5; font-size: 19px; }
+.bar-track { height: 12px; background: #202a33; }
+.bar-fill { height: 100%; min-width: 3px; background: var(--acid); box-shadow: 0 0 12px rgba(215,255,63,.24); }
+.bar-value { font-size: 18px; text-align: right; }
+.calibration-note { margin-top: 24px; padding: 22px; color: #aab4bd; font-size: 21px; line-height: 1.55; border-left: 3px solid var(--cyan); background: rgba(85,216,255,.05); }
+.calibration-note .mono { display: block; margin-bottom: 8px; color: var(--cyan); font-size: 17px; }

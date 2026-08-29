@@ -1,0 +1,23 @@
+{
+  "name": "price-action-learning-lab",
+  "private": true,
+  "version": "0.2.0",
+  "workspaces": [
+    "apps/web",
+    "apps/miniapp",
+    "packages/*"
+  ],
+  "scripts": {
+    "build:web": "npm run build --workspace apps/web",
+    "build:miniapp": "npm run build:weapp --workspace apps/miniapp",
+    "build:packages": "npm run build --workspace packages/api-contracts --workspace packages/domain --workspace packages/chart-core --workspace packages/design-tokens",
+    "test:packages": "npm run test --workspace packages/api-contracts --workspace packages/domain --workspace packages/chart-core --workspace packages/design-tokens",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "typecheck:web": "npm run typecheck --workspace apps/web",
+    "typecheck:miniapp": "npm run typecheck --workspace apps/miniapp",
+    "check": "npm run test:packages && npm run build:packages && npm run typecheck:web && npm run typecheck:miniapp && npm run build:web && npm run build:miniapp"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

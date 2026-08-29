@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import secrets
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -9,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from app import __version__
 from app.api.routes import (
     analytics,
+    auth,
     coach,
     data,
     day_type,
@@ -27,9 +30,11 @@ from app.replay.service import ReplayService
 from app.repositories.replay_repo import ReplayRepository
 from app.repositories.scanner_repo import ScannerRepository
 from app.repositories.sim_trade_repo import SimTradeRepository
+from app.repositories.user_repo import UserRepository
 from app.services.ai_coach_service import AICoachService
 from app.services.analog_search_service import AnalogSearchService
 from app.services.analytics_service import AnalyticsService
+from app.services.auth_service import AuthService, TokenService, WeChatCode2SessionService
 from app.services.calendar import default_calendar
 from app.services.decision_review_service import DecisionContextExtractor
 from app.services.knowledge_service import KnowledgeService
@@ -41,6 +46,14 @@ from app.services.sim_trade_service import SimTradeService
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
     setup_logging()
+
+    # 生产守卫：非 debug 环境必须显式配置认证密钥，禁止静默使用随机临时密钥
+    # （随机密钥会导致每次重启后所有已发放 token 失效）。
+    if not settings.debug and not settings.auth_token_secret:
+        raise RuntimeError(
+            "PALL_AUTH_TOKEN_SECRET must be set when PALL_DEBUG=false "
+            "(生产环境不允许使用随机临时密钥)"
+        )
 
     app = FastAPI(
         title=settings.app_name,
@@ -63,6 +76,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.settings = settings
     app.state.session_factory = factory
+    token_secret = settings.auth_token_secret or secrets.token_urlsafe(32)
+    app.state.auth_service = AuthService(
+        UserRepository(factory), TokenService(token_secret, settings.auth_token_ttl_seconds)
+    )
+    app.state.wechat_code2session_service = WeChatCode2SessionService(
+        app_id=settings.wechat_app_id,
+        app_secret=settings.wechat_app_secret,
+        base_url=settings.wechat_code2session_url,
+    )
     app.state.store = MarketDataStore(settings.data_dir)
     app.state.synth_seed = settings.synthetic_seed
     app.state.sim_trade_service = sim_trade_svc
@@ -85,6 +107,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     app.include_router(health.router, prefix="/api/v1")
+    app.include_router(auth.router, prefix="/api/v1")
     app.include_router(data.router, prefix="/api/v1")
     app.include_router(replay.router, prefix="/api/v1")
     app.include_router(detectors.router, prefix="/api/v1")

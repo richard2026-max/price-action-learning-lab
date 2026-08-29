@@ -29,7 +29,7 @@ class ScannerService:
         self._cal = calendar
         self._repo = repo
 
-    def create_and_run_task(self, req: CreateScanTaskIn, instrument: Instrument) -> ScanTaskORM:
+    def create_and_run_task(self, req: CreateScanTaskIn, instrument: Instrument, user_id: str) -> ScanTaskORM:
         start = date.fromisoformat(req.start_day)
         end = date.fromisoformat(req.end_day)
         all_trading_days = self._cal.trading_days(start, end)
@@ -38,6 +38,7 @@ class ScannerService:
         target_days = [date.fromisoformat(d) for d in target_days_iso]
 
         task = self._repo.create_task(
+            user_id=user_id,
             instrument_id=instrument.instrument_id,
             provider=instrument.provider,
             timeframe=req.timeframe,
@@ -113,11 +114,11 @@ class ScannerService:
 
         self._repo.finish_task(task_id, status="completed")
 
-    def list_tasks(self) -> list[ScanTaskORM]:
-        return self._repo.list_tasks()
+    def list_tasks(self, user_id: str) -> list[ScanTaskORM]:
+        return self._repo.list_tasks(user_id)
 
-    def get_task(self, task_id: str) -> ScanTaskORM | None:
-        return self._repo.get_task(task_id)
+    def get_task(self, task_id: str, user_id: str) -> ScanTaskORM | None:
+        return self._repo.get_task(task_id, user_id)
 
     def list_candidates(
         self,
@@ -127,6 +128,7 @@ class ScannerService:
         only_favorites: bool = False,
         only_mistakes: bool = False,
         limit: int = 200,
+        user_id: str | None = None,
     ) -> list[CandidateRecordORM]:
         return self._repo.list_candidates(
             task_id=task_id,
@@ -135,11 +137,15 @@ class ScannerService:
             only_favorites=only_favorites,
             only_mistakes=only_mistakes,
             limit=limit,
+            user_id=user_id,
         )
 
-    def review_candidate(self, candidate_id: str, req: ReviewCandidateIn) -> CandidateRecordORM | None:
+    def review_candidate(
+        self, candidate_id: str, req: ReviewCandidateIn, user_id: str
+    ) -> CandidateRecordORM | None:
         return self._repo.review_candidate(
             candidate_id,
+            user_id=user_id,
             review_status=req.review_status.value,
             rejection_reason=req.rejection_reason.value if req.rejection_reason else None,
             review_notes=req.review_notes,

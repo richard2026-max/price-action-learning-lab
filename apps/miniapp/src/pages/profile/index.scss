@@ -1,0 +1,21 @@
+.profile-screen { padding-top: 32px; }
+.identity { display: flex; gap: 22px; align-items: center; margin-top: 34px; padding: 25px; }
+.avatar { width: 86px; height: 86px; display: flex; align-items: center; justify-content: center; color: #111600; font-size: 30px; font-weight: 900; background: var(--acid); clip-path: polygon(0 0, 78% 0, 100% 22%, 100% 100%, 0 100%); }
+.identity-name { display: block; font-size: 27px; font-weight: 800; letter-spacing: 1px; }
+.identity-meta { display: block; margin-top: 8px; color: var(--up); font-size: 17px; }
+.group-title { display: block; margin: 36px 0 14px; color: #c3cbd2; font-size: 23px; font-weight: 700; }
+.setting { padding: 25px; }
+.api-base { display: block; margin-top: 9px; color: var(--cyan); font-size: 18px; word-break: break-all; }
+.token-label { display: block; margin-top: 27px; }
+.token-input { height: 76px; margin-top: 10px; padding: 0 17px; color: var(--text); font-size: 23px; border: 1px solid var(--line); background: #080c11; }
+.save-token { margin-top: 14px; height: 74px; font-size: 22px; }
+.setting-list { border-top: 1px solid var(--line); }
+.setting-row { display: flex; justify-content: space-between; align-items: center; min-height: 104px; border-bottom: 1px solid var(--line); }
+.setting-row > view:first-child > text:first-child { display: block; font-size: 25px; font-weight: 700; }
+.setting-hint { display: block; margin-top: 5px; color: var(--muted); font-size: 18px; }
+.setting-value { color: var(--acid); font-size: 22px; }
+.stepper { display: grid; grid-template-columns: 58px 60px 58px; height: 58px; align-items: center; text-align: center; border: 1px solid var(--line); }
+.stepper > text { line-height: 58px; border-right: 1px solid var(--line); }
+.stepper > text:last-child { border: 0; }
+.danger-zone { margin-top: 42px; height: 76px; color: var(--down); font-size: 22px; border: 1px solid rgba(255,95,109,.35); background: rgba(255,95,109,.04); border-radius: 0; }
+.build { display: block; margin-top: 26px; color: #46515c; font-size: 16px; text-align: center; }

@@ -2,14 +2,41 @@
 
 from __future__ import annotations
 
-from fastapi import Request
+from fastapi import Depends, HTTPException, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.domain.instrument import Instrument
+from app.models.orm import UserORM
 from app.replay.service import ReplayService
 from app.services.analytics_service import AnalyticsService
+from app.services.auth_service import AuthError, AuthService
 from app.services.market_data import MarketDataStore
 from app.services.scanner_service import ScannerService
 from app.services.sim_trade_service import SimTradeService
+
+_bearer = HTTPBearer(auto_error=False)
+
+
+def get_auth_service(request: Request) -> AuthService:
+    return request.app.state.auth_service
+
+
+def get_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> UserORM:
+    auth = get_auth_service(request)
+    if credentials is None:
+        settings = request.app.state.settings
+        if settings.debug and settings.legacy_local_user_enabled:
+            return auth.legacy_user()
+        raise HTTPException(status_code=401, detail="Bearer token required")
+    if credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Bearer token required")
+    try:
+        return auth.authenticate(credentials.credentials)
+    except AuthError as exc:
+        raise HTTPException(status_code=401, detail="Invalid or expired bearer token") from exc
 
 
 def get_replay_service(request: Request) -> ReplayService:

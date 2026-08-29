@@ -5,6 +5,9 @@
 2. 市场环境判断分布与交易意图统计；
 3. 候选形态人工审核正反例与拒绝原因归纳；
 4. 盲测复评（Blind Recheck）调度与一致性（test-retest consistency）对比。
+
+所有查询按当前用户过滤：回放/判断/标注经 replay_sessions.user_id，
+候选与审核记录经 scan_tasks.user_id。
 """
 
 from __future__ import annotations
@@ -15,7 +18,13 @@ from datetime import UTC, datetime
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.models.orm import AnnotationORM, CandidateRecordORM, JudgmentORM, ReplaySessionORM
+from app.models.orm import (
+    AnnotationORM,
+    CandidateRecordORM,
+    JudgmentORM,
+    ReplaySessionORM,
+    ScanTaskORM,
+)
 from app.schemas.analytics import (
     AnalyticsOverviewOut,
     BehaviorStats,
@@ -31,17 +40,33 @@ class AnalyticsService:
     def __init__(self, factory: sessionmaker[Session]) -> None:
         self._factory = factory
 
-    def get_overview(self) -> AnalyticsOverviewOut:
+    def get_overview(self, user_id: str) -> AnalyticsOverviewOut:
         with self._factory() as s:
-            total_sessions = s.scalar(select(func.count(ReplaySessionORM.id))) or 0
-            completed_sessions = s.scalar(
-                select(func.count(ReplaySessionORM.id)).where(ReplaySessionORM.state == "completed")
+            total_sessions = s.scalar(
+                select(func.count(ReplaySessionORM.id)).where(ReplaySessionORM.user_id == user_id)
             ) or 0
-            total_judgments = s.scalar(select(func.count(JudgmentORM.id))) or 0
-            total_annotations = s.scalar(select(func.count(AnnotationORM.id))) or 0
+            completed_sessions = s.scalar(
+                select(func.count(ReplaySessionORM.id)).where(
+                    ReplaySessionORM.state == "completed", ReplaySessionORM.user_id == user_id
+                )
+            ) or 0
+            total_judgments = s.scalar(
+                select(func.count(JudgmentORM.id))
+                .join(ReplaySessionORM, ReplaySessionORM.id == JudgmentORM.session_id)
+                .where(ReplaySessionORM.user_id == user_id)
+            ) or 0
+            total_annotations = s.scalar(
+                select(func.count(AnnotationORM.id))
+                .join(ReplaySessionORM, ReplaySessionORM.id == AnnotationORM.session_id)
+                .where(ReplaySessionORM.user_id == user_id)
+            ) or 0
 
-            # 候选审核统计
-            c_stmt = select(func.count(CandidateRecordORM.id))
+            # 候选审核统计（候选经 scan_tasks 归属当前用户）
+            c_stmt = (
+                select(func.count(CandidateRecordORM.id))
+                .join(ScanTaskORM, ScanTaskORM.id == CandidateRecordORM.task_id)
+                .where(ScanTaskORM.user_id == user_id)
+            )
             total_reviewed = s.scalar(c_stmt.where(CandidateRecordORM.review_status != "unreviewed")) or 0
             total_confirmed = s.scalar(c_stmt.where(CandidateRecordORM.review_status == "confirmed")) or 0
             total_rejected = s.scalar(c_stmt.where(CandidateRecordORM.review_status == "rejected")) or 0
@@ -49,7 +74,11 @@ class AnalyticsService:
             total_mistakes = s.scalar(c_stmt.where(CandidateRecordORM.is_mistake_notebook.is_(True))) or 0
 
             # 判断分布统计
-            judgments = s.scalars(select(JudgmentORM)).all()
+            judgments = s.scalars(
+                select(JudgmentORM)
+                .join(ReplaySessionORM, ReplaySessionORM.id == JudgmentORM.session_id)
+                .where(ReplaySessionORM.user_id == user_id)
+            ).all()
             ctx_counter: Counter[str] = Counter()
             dir_counter: Counter[str] = Counter()
             conf_counter: Counter[str] = Counter()
@@ -64,20 +93,30 @@ class AnalyticsService:
 
             # 拒绝原因统计
             rejections = s.scalars(
-                select(CandidateRecordORM.rejection_reason).where(CandidateRecordORM.review_status == "rejected")
+                select(CandidateRecordORM.rejection_reason)
+                .join(ScanTaskORM, ScanTaskORM.id == CandidateRecordORM.task_id)
+                .where(
+                    CandidateRecordORM.review_status == "rejected",
+                    ScanTaskORM.user_id == user_id,
+                )
             ).all()
             reason_counter: Counter[str] = Counter(r for r in rejections if r)
 
             # 近期错题与收藏
             recent_mistakes_orm = s.scalars(
                 select(CandidateRecordORM)
-                .where(CandidateRecordORM.is_mistake_notebook.is_(True))
+                .join(ScanTaskORM, ScanTaskORM.id == CandidateRecordORM.task_id)
+                .where(
+                    CandidateRecordORM.is_mistake_notebook.is_(True),
+                    ScanTaskORM.user_id == user_id,
+                )
                 .order_by(desc(CandidateRecordORM.reviewed_at))
                 .limit(10)
             ).all()
             recent_favorites_orm = s.scalars(
                 select(CandidateRecordORM)
-                .where(CandidateRecordORM.is_favorite.is_(True))
+                .join(ScanTaskORM, ScanTaskORM.id == CandidateRecordORM.task_id)
+                .where(CandidateRecordORM.is_favorite.is_(True), ScanTaskORM.user_id == user_id)
                 .order_by(desc(CandidateRecordORM.reviewed_at))
                 .limit(10)
             ).all()
@@ -113,12 +152,16 @@ class AnalyticsService:
                 } for f in recent_favorites_orm],
             )
 
-    def get_blind_recheck_queue(self, limit: int = 20) -> list[BlindRecheckItem]:
-        """提取过去已审核过的候选作为盲测样本（严格脱敏原始审核标签与笔记）。"""
+    def get_blind_recheck_queue(self, user_id: str, limit: int = 20) -> list[BlindRecheckItem]:
+        """提取当前用户已审核过的候选作为盲测样本（严格脱敏原始审核标签与笔记）。"""
         with self._factory() as s:
             rows = s.scalars(
                 select(CandidateRecordORM)
-                .where(CandidateRecordORM.review_status.in_(("confirmed", "rejected")))
+                .join(ScanTaskORM, ScanTaskORM.id == CandidateRecordORM.task_id)
+                .where(
+                    CandidateRecordORM.review_status.in_(("confirmed", "rejected")),
+                    ScanTaskORM.user_id == user_id,
+                )
                 .order_by(func.random())
                 .limit(limit)
             ).all()
@@ -136,10 +179,17 @@ class AnalyticsService:
                 for r in rows
             ]
 
-    def submit_recheck(self, req: SubmitRecheckIn) -> RecheckCompareResult:
-        """提交盲测复评结论并揭晓前后一致性对比。"""
+    def submit_recheck(self, req: SubmitRecheckIn, user_id: str) -> RecheckCompareResult:
+        """提交盲测复评结论并揭晓前后一致性对比（仅限本人候选）。"""
         with self._factory() as s:
-            orm = s.get(CandidateRecordORM, req.candidate_id)
+            orm = s.scalar(
+                select(CandidateRecordORM)
+                .join(ScanTaskORM, ScanTaskORM.id == CandidateRecordORM.task_id)
+                .where(
+                    CandidateRecordORM.id == req.candidate_id,
+                    ScanTaskORM.user_id == user_id,
+                )
+            )
             if not orm:
                 raise ValueError("Candidate not found")
 
@@ -157,12 +207,16 @@ class AnalyticsService:
                 recheck_notes=req.recheck_notes,
             )
 
-    def get_trade_stats(self) -> dict:
-        """模拟交易统计仪表盘：胜率、期望值、R 分布、盈亏比。"""
+    def get_trade_stats(self, user_id: str) -> dict:
+        """模拟交易统计仪表盘：胜率、期望值、R 分布、盈亏比（仅本人会话）。"""
         from app.models.orm import SimTradeORM
 
         with self._factory() as s:
-            all_trades = s.scalars(select(SimTradeORM)).all()
+            all_trades = s.scalars(
+                select(SimTradeORM)
+                .join(ReplaySessionORM, ReplaySessionORM.id == SimTradeORM.session_id)
+                .where(ReplaySessionORM.user_id == user_id)
+            ).all()
             total = len(all_trades)
             closed = [t for t in all_trades if t.status == "closed"]
             open_t = total - len(closed)

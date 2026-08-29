@@ -1,4 +1,7 @@
-"""AI Coach API 路由。服务实例由应用工厂注入到 app.state。"""
+"""AI Coach API 路由。服务实例由应用工厂注入到 app.state。
+
+所有涉及训练数据的路由都先校验 session 归属当前用户（404 = 不存在或不属于你）。
+"""
 
 from __future__ import annotations
 
@@ -6,12 +9,14 @@ from dataclasses import asdict
 from datetime import date
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
+from app.api.deps import get_current_user
 from app.core.config import Settings
 from app.domain.bar import SessionType, Timeframe
 from app.domain.instrument import get_instrument
+from app.models.orm import UserORM
 from app.replay.service import ReplayError
 from app.services.ai_coach_service import AICoachService, CoachAnswer
 from app.services.decision_review_service import DecisionContextExtractor
@@ -31,13 +36,27 @@ def _review_error(error: ReplayError) -> HTTPException:
     return HTTPException(error.status, detail={"code": error.code, "message": error.message})
 
 
+def _owned_session_or_404(request: Request, session_id: str, user_id: str):
+    replay = request.app.state.replay_service
+    session = replay._repo.get(session_id, user_id)
+    if session is None:
+        raise ReplayError("not_found", "session 不存在", 404)
+    return session
+
+
 @router.get("/status")
-def coach_status(request: Request) -> dict:
+def coach_status(
+    request: Request,
+    _user: UserORM = Depends(get_current_user),
+) -> dict:
     return {"enabled": _coach(request).enabled}
 
 
 @router.get("/config")
-def coach_config(request: Request) -> dict:
+def coach_config(
+    request: Request,
+    _user: UserORM = Depends(get_current_user),
+) -> dict:
     return _coach(request).config()
 
 
@@ -46,6 +65,7 @@ def ask_concept(
     request: Request,
     term: str = Query(..., min_length=1),
     question: str = Query("", max_length=500),
+    _user: UserORM = Depends(get_current_user),
 ) -> CoachAnswer:
     if not term.strip():
         raise HTTPException(400, "概念术语不能为空")
@@ -58,8 +78,10 @@ def review_judgment(
     session_id: str,
     judgment_id: int,
     refresh: bool = Query(False, description="是否强制重新调用 AI 分析"),
+    user: UserORM = Depends(get_current_user),
 ) -> dict:
     try:
+        _owned_session_or_404(request, session_id, user.id)
         context = _extractor(request).extract(session_id, judgment_id)
     except ReplayError as error:
         raise _review_error(error) from None
@@ -90,12 +112,11 @@ def analogs(
     target_date: str | None = Query(None, description="指定过往某一天 (YYYY-MM-DD)"),
     start_date: str | None = Query(None, description="指定过往日期范围开始 (YYYY-MM-DD)"),
     end_date: str | None = Query(None, description="指定过往日期范围结束 (YYYY-MM-DD)"),
+    user: UserORM = Depends(get_current_user),
 ) -> dict:
     try:
         replay = request.app.state.replay_service
-        session = replay._repo.get(session_id)
-        if session is None:
-            raise ReplayError("not_found", "session 不存在", 404)
+        session = _owned_session_or_404(request, session_id, user.id)
         context = _extractor(request).extract(session_id, judgment_id)
         instrument = get_instrument(session.instrument_id, session.provider)
         data = replay._load(instrument, session.day, context_days=0)
@@ -118,7 +139,11 @@ def analogs(
 
 
 @router.get("/analogs/chart-image")
-def get_analog_chart_image(request: Request, file: str = Query(...)) -> FileResponse:
+def get_analog_chart_image(
+    request: Request,
+    file: str = Query(...),
+    _user: UserORM = Depends(get_current_user),
+) -> FileResponse:
     """提供历史 SPY 相似走势的 K 线切片图像文件。"""
     settings: Settings = getattr(request.app.state, "settings", Settings())
     target = settings.data_dir / "cache" / "analog_charts" / Path(file).name
@@ -128,15 +153,21 @@ def get_analog_chart_image(request: Request, file: str = Query(...)) -> FileResp
 
 
 @router.post("/sessions/{session_id}/summary-review")
-def summary_review(request: Request, session_id: str) -> dict:
+def summary_review(
+    request: Request,
+    session_id: str,
+    user: UserORM = Depends(get_current_user),
+) -> dict:
     try:
         # Each context is independently bounded at its own judgment; no later cursor
         # or posterior trade outcome is included in the prompts.
         extractor = _extractor(request)
         replay = request.app.state.replay_service
-        if replay._repo.get(session_id) is None:
-            raise ReplayError("not_found", "session 不存在", 404)
-        contexts = [extractor.extract(session_id, j.id) for j in replay._repo.list_judgments(session_id)]
+        _owned_session_or_404(request, session_id, user.id)
+        contexts = [
+            extractor.extract(session_id, j.id)
+            for j in replay._repo.list_judgments(session_id, user.id)
+        ]
     except ReplayError as error:
         raise _review_error(error) from None
     result = _coach(request).summary_review(contexts)

@@ -3,7 +3,15 @@
  */
 
 import { useState } from "react";
-import type { JudgmentPayload } from "../api/client";
+import {
+  firstJudgmentErrorMessage,
+  validateJudgment,
+  type JudgmentGrade,
+  type JudgmentPayload,
+  type MarketContext,
+  type TernaryAnswer,
+  type TradeDirection,
+} from "@price-action/domain";
 
 interface Props {
   barIndex: number;
@@ -38,35 +46,49 @@ const GRADES = [
 ] as const;
 
 export default function JudgmentForm({ barIndex, price, onSubmit, onCancel }: Props) {
-  const [contextLabel, setContextLabel] = useState("transition");
+  const [contextLabel, setContextLabel] = useState<MarketContext>("transition");
   const [structureNote, setStructureNote] = useState("");
-  const [pullback, setPullback] = useState("unknown");
+  const [pullback, setPullback] = useState<TernaryAnswer>("unknown");
   const [barCountingNote, setBarCountingNote] = useState("");
-  const [direction, setDirection] = useState("none");
+  const [direction, setDirection] = useState<TradeDirection>("none");
   const [reason1, setReason1] = useState("");
   const [reason2, setReason2] = useState("");
   const [entry, setEntry] = useState("");
   const [stop, setStop] = useState("");
   const [target, setTarget] = useState("");
-  const [probability, setProbability] = useState("okay");
-  const [confidence, setConfidence] = useState("okay");
+  const [probability, setProbability] = useState<JudgmentGrade>("okay");
+  const [confidence, setConfidence] = useState<JudgmentGrade>("okay");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
   const considering = direction !== "none";
 
-  const validate = (): string => {
-    if (considering) {
-      if (!reason1.trim() || !reason2.trim()) return "必须提供至少两个独立的入场理由（Two Reasons Rule）";
-      const e = Number(entry), s = Number(stop), t = Number(target);
-      if (!entry || !stop || !target) return "考虑入场交易时，必须明确设定 Entry / Stop / Target";
-      if (direction === "long" && !(s < e && e < t)) return "做多交易要求：止损 < 入场 < 目标";
-      if (direction === "short" && !(t < e && e < s)) return "做空交易要求：目标 < 入场 < 止损";
-    }
-    return "";
+  const buildPayload = (): JudgmentPayload => {
+    const priceOrNull = (raw: string): number | null => {
+      if (!raw.trim()) return null;
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : null;
+    };
+    return {
+      context_label: contextLabel,
+      structure_note: structureNote,
+      pullback_present: pullback,
+      bar_counting_note: barCountingNote,
+      considering_trade: considering,
+      direction,
+      reasons: considering ? [reason1.trim(), reason2.trim()] : [],
+      entry: considering ? priceOrNull(entry) : null,
+      stop: considering ? priceOrNull(stop) : null,
+      target: considering ? priceOrNull(target) : null,
+      probability_estimate: probability,
+      confidence,
+    };
   };
 
+  const validate = (): string => firstJudgmentErrorMessage(validateJudgment(buildPayload()));
+
   const submit = async () => {
+    const payload = buildPayload();
     const v = validate();
     if (v) {
       setErr(v);
@@ -75,20 +97,7 @@ export default function JudgmentForm({ barIndex, price, onSubmit, onCancel }: Pr
     setBusy(true);
     setErr("");
     try {
-      await onSubmit({
-        context_label: contextLabel,
-        structure_note: structureNote,
-        pullback_present: pullback,
-        bar_counting_note: barCountingNote,
-        considering_trade: considering,
-        direction,
-        reasons: considering ? [reason1.trim(), reason2.trim()] : [],
-        entry: considering ? Number(entry) : null,
-        stop: considering ? Number(stop) : null,
-        target: considering ? Number(target) : null,
-        probability_estimate: probability,
-        confidence,
-      });
+      await onSubmit(payload);
     } catch (e) {
       setErr(String(e));
     } finally {

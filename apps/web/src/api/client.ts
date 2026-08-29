@@ -1,13 +1,46 @@
-/** API 客户端（Phase 0 数据管理 + MVP-A 回放训练 + MVP-D 扫描工作台 + Analytics 学习分析 + SimTrade 模拟交易）。 */
+/** API 客户端（Phase 0 数据管理 + MVP-A 回放训练 + MVP-D 扫描工作台 + Analytics 学习分析 + SimTrade 模拟交易）。
+ *
+ * 回放与判断的 DTO 统一来自 @price-action/api-contracts / @price-action/domain，
+ * 与微信小程序共享同一契约；桌面端新增字段时先更新 packages，两端同步获得类型。
+ */
+
+import type {
+  AnnotationDto,
+  JudgmentDto,
+  ReplayCandidate,
+  ReplaySessionSummary,
+  SessionDetail,
+} from "@price-action/api-contracts";
+import type { JudgmentPayload, Provider } from "@price-action/domain";
 
 const BASE = "/api/v1";
+
+/** 把 FastAPI 校验错误（detail 为数组/对象）解析成人话，避免把整坨 JSON 抛给用户。 */
+function friendlyDetail(raw: unknown): string {
+  if (typeof raw === "string") return raw;
+  if (Array.isArray(raw)) {
+    return raw
+      .map((item) => {
+        const msg = (item as { msg?: string })?.msg ?? "";
+        return msg.replace(/^Value error,\s*/i, "").trim();
+      })
+      .filter(Boolean)
+      .join("；");
+  }
+  if (raw && typeof raw === "object") {
+    const obj = raw as { msg?: string; detail?: unknown };
+    if (typeof obj.msg === "string") return obj.msg.replace(/^Value error,\s*/i, "").trim();
+    if (obj.detail !== undefined) return friendlyDetail(obj.detail);
+  }
+  return JSON.stringify(raw);
+}
 
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) {
     let detail = `${r.status}`;
     try {
       const body = await r.json();
-      detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail ?? body);
+      detail = body.detail !== undefined ? friendlyDetail(body.detail) : `${r.status}`;
     } catch {
       /* ignore */
     }
@@ -43,103 +76,21 @@ export const seedDemo = (start: string, end: string) =>
 
 // ---------- 回放 ----------
 
-export type Provider = "synthetic" | "hfdl";
+export type {
+  Bar,
+  KeyLevels,
+  SessionDetail,
+  SessionInfo,
+  ReplaySessionSummary,
+} from "@price-action/api-contracts";
+export type { JudgmentPayload, Provider } from "@price-action/domain";
+
+/** 兼容别名：桌面端既有代码使用的名称。 */
+export type Candidate = ReplayCandidate;
+export type Judgment = JudgmentDto;
+export type Annotation = AnnotationDto;
 
 const q = (provider: Provider) => `provider=${provider}&instrument_id=SPY`;
-
-export interface Bar {
-  ts_open_utc: string;
-  ts_close_utc: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-  session: string;
-  is_complete: boolean;
-}
-
-export interface KeyLevels {
-  prev_day_open: number | null;
-  prev_day_high: number | null;
-  prev_day_low: number | null;
-  prev_day_close: number | null;
-  today_open: number | null;
-  premarket_high: number | null;
-  premarket_low: number | null;
-  gap: number | null;
-}
-
-export interface SessionInfo {
-  day: string;
-  provider: string;
-  session_name: string;
-  bar_index: number;  // 训练日内K线下标（不含上下文）
-  context_bar_count: number;  // 前N日上下文K线数量
-  market_time_utc: string;
-  session_close_utc: string | null;
-  is_completed: boolean;
-  mode: string;
-  sampling_mode: string;
-}
-
-export interface Candidate {
-  detector_id: string;
-  detector_version: string;
-  bar_index: number;
-  ts_event: string;
-  ts_knowable: string;
-  knowable_precision: string;
-  result_type: string;
-  result: unknown;
-  evidence: Record<string, unknown>;
-  rule_source: string;
-  provenance: string;
-}
-
-export interface SessionDetail {
-  session_id: string;
-  bars: Bar[];
-  ema20: (number | null)[];
-  key_levels: KeyLevels;
-  info: SessionInfo;
-  candidates?: Candidate[];
-}
-
-export interface Judgment {
-  id: number;
-  session_id: string;
-  bar_index: number;
-  bar_time_utc: string;
-  payload: JudgmentPayload;
-  submitted_at: string;
-}
-
-export interface JudgmentPayload {
-  context_label: string;
-  structure_note: string;
-  pullback_present: string;
-  bar_counting_note: string;
-  considering_trade: boolean;
-  direction: string;
-  reasons: string[];
-  entry: number | null;
-  stop: number | null;
-  target: number | null;
-  probability_estimate: string;
-  confidence: string;
-}
-
-export interface Annotation {
-  id: number;
-  session_id: string;
-  bar_index: number;
-  bar_time_utc: string;
-  kind: string;
-  label: string | null;
-  text: string | null;
-  created_at: string;
-}
 
 export const listDays = (provider: Provider = "synthetic", includeSealed: boolean = false) =>
   fetch(`${BASE}/replay/days?${q(provider)}&include_sealed=${includeSealed}`)
@@ -188,18 +139,6 @@ export const submitJudgment = (id: string, provider: Provider, payload: Judgment
 
 export const listJudgments = (id: string, provider: Provider) =>
   fetch(`${BASE}/replay/sessions/${id}/judgments?${q(provider)}`).then((r) => j<Judgment[]>(r));
-
-export interface ReplaySessionSummary {
-  session_id: string;
-  day: string;
-  provider: string;
-  instrument_id: string;
-  mode: string;
-  state: string;
-  cursor_index: number;
-  judgment_count: number;
-  created_at: string;
-}
 
 export const listSessions = (limit = 100) =>
   fetch(`${BASE}/replay/sessions?limit=${limit}`).then((r) => j<ReplaySessionSummary[]>(r));
@@ -353,8 +292,8 @@ export const createSimTrade = (sessionId: string, provider: Provider, payload: C
     body: JSON.stringify(payload),
   }).then((r) => j<SimTrade>(r));
 
-export const listSessionTrades = (sessionId: string) =>
-  fetch(`${BASE}/trades/sessions/${sessionId}`).then((r) => j<SimTrade[]>(r));
+export const listSessionTrades = (sessionId: string, provider: Provider) =>
+  fetch(`${BASE}/trades/sessions/${sessionId}?${q(provider)}`).then((r) => j<SimTrade[]>(r));
 
 export const manualExitTrade = (tradeId: string, sessionId: string, provider: Provider, notes?: string) =>
   fetch(`${BASE}/trades/${tradeId}/exit?session_id=${sessionId}&${q(provider)}`, {

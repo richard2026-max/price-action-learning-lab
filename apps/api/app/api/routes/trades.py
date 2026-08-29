@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.api.deps import get_replay_service, get_sim_trade_service, resolve_instrument
+from app.api.deps import get_current_user, get_replay_service, get_sim_trade_service, resolve_instrument
+from app.models.orm import UserORM
 from app.replay.service import ReplayError, ReplayService
 from app.schemas.sim_trade import CreateSimTradeIn, ManualExitTradeIn, SimTradeOut
 from app.services.sim_trade_service import SimTradeService
@@ -20,10 +21,11 @@ def create_sim_trade(
     instrument_id: str = "SPY",
     replay_svc: ReplayService = Depends(get_replay_service),
     trade_svc: SimTradeService = Depends(get_sim_trade_service),
+    user: UserORM = Depends(get_current_user),
 ) -> SimTradeOut:
     instrument = resolve_instrument(instrument_id, provider)
     try:
-        session_detail = replay_svc.get(session_id, instrument)
+        session_detail = replay_svc.get(session_id, instrument, user.id)
     except ReplayError as e:
         raise HTTPException(status_code=e.status, detail=e.message) from e
 
@@ -65,8 +67,17 @@ def create_sim_trade(
 @router.get("/sessions/{session_id}", response_model=list[SimTradeOut])
 def list_session_trades(
     session_id: str,
+    provider: str = "synthetic",
+    instrument_id: str = "SPY",
+    replay_svc: ReplayService = Depends(get_replay_service),
     trade_svc: SimTradeService = Depends(get_sim_trade_service),
+    user: UserORM = Depends(get_current_user),
 ) -> list[SimTradeOut]:
+    instrument = resolve_instrument(instrument_id, provider)
+    try:
+        replay_svc.get(session_id, instrument, user.id)
+    except ReplayError as error:
+        raise HTTPException(status_code=error.status, detail=error.message) from error
     rows = trade_svc._repo.list_trades_for_session(session_id)
     return [SimTradeOut.model_validate(r, from_attributes=True) for r in rows]
 
@@ -80,10 +91,11 @@ def manual_exit_trade(
     instrument_id: str = "SPY",
     replay_svc: ReplayService = Depends(get_replay_service),
     trade_svc: SimTradeService = Depends(get_sim_trade_service),
+    user: UserORM = Depends(get_current_user),
 ) -> SimTradeOut:
     instrument = resolve_instrument(instrument_id, provider)
     try:
-        session_detail = replay_svc.get(session_id, instrument)
+        session_detail = replay_svc.get(session_id, instrument, user.id)
     except ReplayError as e:
         raise HTTPException(status_code=e.status, detail=e.message) from e
 

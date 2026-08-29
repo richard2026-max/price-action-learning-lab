@@ -1,10 +1,11 @@
-"""回放路由（MVP-A 核心）。所有行情响应经 ReplayService 服务端裁剪（no-lookahead）。"""
+"""回放路由（MVP-A 核心）。所有行情响应经 ReplayService 服务端裁剪。"""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from app.api.deps import get_replay_service, resolve_instrument
+from app.api.deps import get_current_user, get_replay_service, resolve_instrument
+from app.models.orm import UserORM
 from app.replay.service import ReplayError, ReplayService
 from app.schemas.replay import (
     AdvanceIn,
@@ -19,16 +20,20 @@ from app.schemas.replay import (
 router = APIRouter(prefix="/replay", tags=["replay"])
 
 
-def _http(e: ReplayError) -> HTTPException:
-    return HTTPException(status_code=e.status, detail={"code": e.code, "message": e.message})
+def _http(error: ReplayError) -> HTTPException:
+    return HTTPException(
+        status_code=error.status,
+        detail={"code": error.code, "message": error.message},
+    )
 
 
 @router.get("/days")
 def available_days(
     instrument_id: str = "SPY",
     provider: str = "synthetic",
-    include_sealed: bool = Query(False, description="是否包含封存考试日（普通训练默认排除）"),
+    include_sealed: bool = Query(False, description="是否包含封存考试日"),
     svc: ReplayService = Depends(get_replay_service),
+    _user: UserORM = Depends(get_current_user),
 ) -> dict:
     instrument = resolve_instrument(instrument_id, provider)
     return {"days": svc.available_days(instrument, include_sealed=include_sealed)}
@@ -39,8 +44,8 @@ def exam_summary(
     instrument_id: str = "SPY",
     provider: str = "synthetic",
     svc: ReplayService = Depends(get_replay_service),
+    _user: UserORM = Depends(get_current_user),
 ) -> dict:
-    """获取数据集封存集统计信息（用于质量报告与考试准备）。"""
     from app.services.sealed_exam import get_exam_split_summary
 
     instrument = resolve_instrument(instrument_id, provider)
@@ -55,36 +60,37 @@ def random_day(
     provider: str = "synthetic",
     for_exam: bool = Query(False, description="是否从封存考试集中抽取"),
     svc: ReplayService = Depends(get_replay_service),
+    _user: UserORM = Depends(get_current_user),
 ) -> dict:
     instrument = resolve_instrument(instrument_id, provider)
     try:
         return {"day": svc.random_day(instrument, seed, for_exam=for_exam)}
-    except ReplayError as e:
-        raise _http(e) from None
+    except ReplayError as error:
+        raise _http(error) from None
 
 
 @router.post("/sessions", response_model=SessionDetailOut)
 def create_session(
     req: CreateSessionIn,
     svc: ReplayService = Depends(get_replay_service),
+    user: UserORM = Depends(get_current_user),
 ) -> SessionDetailOut:
     instrument = resolve_instrument(req.instrument_id, req.provider)
     try:
-        return svc.create(req, instrument)
-    except ReplayError as e:
-        raise _http(e) from None
+        return svc.create(req, instrument, user.id)
+    except ReplayError as error:
+        raise _http(error) from None
 
 
 @router.get("/sessions")
 def list_sessions(
     limit: int = Query(100, ge=1, le=500),
     svc: ReplayService = Depends(get_replay_service),
+    user: UserORM = Depends(get_current_user),
 ) -> list[dict]:
-    """列出最近的历史训练会话（倒序），供会话管理面板查看与删除。"""
-    repo = svc._repo
     out: list[dict] = []
-    for orm in repo.list_sessions(limit=limit):
-        judgments = repo.list_judgments(orm.id)
+    for orm in svc._repo.list_sessions(user.id, limit=limit):
+        judgments = svc._repo.list_judgments(orm.id, user.id)
         out.append(
             {
                 "session_id": orm.id,
@@ -94,6 +100,7 @@ def list_sessions(
                 "mode": orm.mode,
                 "state": orm.state,
                 "cursor_index": orm.cursor_index,
+                "cursor_version": orm.cursor_version,
                 "judgment_count": len(judgments),
                 "created_at": orm.created_at.isoformat(),
             }
@@ -107,12 +114,13 @@ def get_session(
     provider: str = "synthetic",
     instrument_id: str = "SPY",
     svc: ReplayService = Depends(get_replay_service),
+    user: UserORM = Depends(get_current_user),
 ) -> SessionDetailOut:
     instrument = resolve_instrument(instrument_id, provider)
     try:
-        return svc.get(session_id, instrument)
-    except ReplayError as e:
-        raise _http(e) from None
+        return svc.get(session_id, instrument, user.id)
+    except ReplayError as error:
+        raise _http(error) from None
 
 
 @router.post("/sessions/{session_id}/advance", response_model=SessionDetailOut)
@@ -122,12 +130,13 @@ def advance(
     provider: str = "synthetic",
     instrument_id: str = "SPY",
     svc: ReplayService = Depends(get_replay_service),
+    user: UserORM = Depends(get_current_user),
 ) -> SessionDetailOut:
     instrument = resolve_instrument(instrument_id, provider)
     try:
-        return svc.advance(session_id, req, instrument)
-    except ReplayError as e:
-        raise _http(e) from None
+        return svc.advance(session_id, req, instrument, user.id)
+    except ReplayError as error:
+        raise _http(error) from None
 
 
 @router.post("/sessions/{session_id}/back", response_model=SessionDetailOut)
@@ -136,12 +145,13 @@ def back(
     provider: str = "synthetic",
     instrument_id: str = "SPY",
     svc: ReplayService = Depends(get_replay_service),
+    user: UserORM = Depends(get_current_user),
 ) -> SessionDetailOut:
     instrument = resolve_instrument(instrument_id, provider)
     try:
-        return svc.back(session_id, instrument)
-    except ReplayError as e:
-        raise _http(e) from None
+        return svc.back(session_id, instrument, user.id)
+    except ReplayError as error:
+        raise _http(error) from None
 
 
 @router.post("/sessions/{session_id}/judgments", response_model=JudgmentOut, status_code=201)
@@ -151,17 +161,21 @@ def submit_judgment(
     provider: str = "synthetic",
     instrument_id: str = "SPY",
     svc: ReplayService = Depends(get_replay_service),
+    user: UserORM = Depends(get_current_user),
 ) -> JudgmentOut:
-    """Predict First：提交即锁定（无更新接口）。bar_index 取服务端 cursor。"""
     instrument = resolve_instrument(instrument_id, provider)
     try:
-        j = svc.submit_judgment(session_id, req, instrument)
+        judgment = svc.submit_judgment(session_id, req, instrument, user.id)
         return JudgmentOut(
-            id=j.id, session_id=j.session_id, bar_index=j.bar_index,
-            bar_time_utc=j.bar_time_utc, payload=j.payload, submitted_at=j.submitted_at,
+            id=judgment.id,
+            session_id=judgment.session_id,
+            bar_index=judgment.bar_index,
+            bar_time_utc=judgment.bar_time_utc,
+            payload=judgment.payload,
+            submitted_at=judgment.submitted_at,
         )
-    except ReplayError as e:
-        raise _http(e) from None
+    except ReplayError as error:
+        raise _http(error) from None
 
 
 @router.get("/sessions/{session_id}/judgments", response_model=list[JudgmentOut])
@@ -170,18 +184,23 @@ def list_judgments(
     provider: str = "synthetic",
     instrument_id: str = "SPY",
     svc: ReplayService = Depends(get_replay_service),
+    user: UserORM = Depends(get_current_user),
 ) -> list[JudgmentOut]:
     instrument = resolve_instrument(instrument_id, provider)
     try:
-        svc.get(session_id, instrument)  # 校验存在
-    except ReplayError as e:
-        raise _http(e) from None
+        svc.get(session_id, instrument, user.id)
+    except ReplayError as error:
+        raise _http(error) from None
     return [
         JudgmentOut(
-            id=j.id, session_id=j.session_id, bar_index=j.bar_index,
-            bar_time_utc=j.bar_time_utc, payload=j.payload, submitted_at=j.submitted_at,
+            id=item.id,
+            session_id=item.session_id,
+            bar_index=item.bar_index,
+            bar_time_utc=item.bar_time_utc,
+            payload=item.payload,
+            submitted_at=item.submitted_at,
         )
-        for j in svc._repo.list_judgments(session_id)
+        for item in svc._repo.list_judgments(session_id, user.id)
     ]
 
 
@@ -193,17 +212,17 @@ def delete_judgment(
     provider: str = "synthetic",
     instrument_id: str = "SPY",
     svc: ReplayService = Depends(get_replay_service),
+    user: UserORM = Depends(get_current_user),
 ) -> dict:
-    """删除指定判断记录，并级联清理对应的 AI 复盘缓存。"""
     _ = resolve_instrument(instrument_id, provider)
     try:
-        svc.delete_judgment(session_id, judgment_id)
+        svc.delete_judgment(session_id, judgment_id, user.id)
         coach_svc = getattr(request.app.state, "ai_coach_service", None)
         if coach_svc and hasattr(coach_svc, "evict_review"):
             coach_svc.evict_review(session_id, judgment_id)
         return {"status": "ok", "deleted_judgment_id": judgment_id}
-    except ReplayError as e:
-        raise _http(e) from None
+    except ReplayError as error:
+        raise _http(error) from None
 
 
 @router.delete("/sessions/{session_id}")
@@ -213,17 +232,17 @@ def delete_session(
     provider: str = "synthetic",
     instrument_id: str = "SPY",
     svc: ReplayService = Depends(get_replay_service),
+    user: UserORM = Depends(get_current_user),
 ) -> dict:
-    """删除整场回放会话（外键级联清空全部关联判断、模拟交易与笔记）。"""
     _ = resolve_instrument(instrument_id, provider)
     try:
-        svc.delete_session(session_id)
+        svc.delete_session(session_id, user.id)
         coach_svc = getattr(request.app.state, "ai_coach_service", None)
         if coach_svc and hasattr(coach_svc, "evict_session"):
             coach_svc.evict_session(session_id)
         return {"status": "ok", "deleted_session_id": session_id}
-    except ReplayError as e:
-        raise _http(e) from None
+    except ReplayError as error:
+        raise _http(error) from None
 
 
 @router.post("/sessions/{session_id}/annotations", response_model=AnnotationOut, status_code=201)
@@ -233,15 +252,23 @@ def add_annotation(
     provider: str = "synthetic",
     instrument_id: str = "SPY",
     svc: ReplayService = Depends(get_replay_service),
+    user: UserORM = Depends(get_current_user),
 ) -> AnnotationOut:
     instrument = resolve_instrument(instrument_id, provider)
     try:
-        a = svc.add_annotation(session_id, req, instrument)
-    except ReplayError as e:
-        raise _http(e) from None
+        annotation = svc.add_annotation(session_id, req, instrument, user.id)
+    except ReplayError as error:
+        raise _http(error) from None
     return AnnotationOut(
-        id=a.id, session_id=a.session_id, bar_index=a.bar_index, bar_time_utc=a.bar_time_utc,
-        kind=a.kind, label=a.label, text=a.text, created_at=a.created_at, updated_at=a.updated_at,
+        id=annotation.id,
+        session_id=annotation.session_id,
+        bar_index=annotation.bar_index,
+        bar_time_utc=annotation.bar_time_utc,
+        kind=annotation.kind,
+        label=annotation.label,
+        text=annotation.text,
+        created_at=annotation.created_at,
+        updated_at=annotation.updated_at,
     )
 
 
@@ -251,16 +278,24 @@ def list_annotations(
     provider: str = "synthetic",
     instrument_id: str = "SPY",
     svc: ReplayService = Depends(get_replay_service),
+    user: UserORM = Depends(get_current_user),
 ) -> list[AnnotationOut]:
     instrument = resolve_instrument(instrument_id, provider)
     try:
-        svc.get(session_id, instrument)
-    except ReplayError as e:
-        raise _http(e) from None
+        svc.get(session_id, instrument, user.id)
+    except ReplayError as error:
+        raise _http(error) from None
     return [
         AnnotationOut(
-            id=a.id, session_id=a.session_id, bar_index=a.bar_index, bar_time_utc=a.bar_time_utc,
-            kind=a.kind, label=a.label, text=a.text, created_at=a.created_at, updated_at=a.updated_at,
+            id=item.id,
+            session_id=item.session_id,
+            bar_index=item.bar_index,
+            bar_time_utc=item.bar_time_utc,
+            kind=item.kind,
+            label=item.label,
+            text=item.text,
+            created_at=item.created_at,
+            updated_at=item.updated_at,
         )
-        for a in svc._repo.list_annotations(session_id)
+        for item in svc._repo.list_annotations(session_id, user.id)
     ]

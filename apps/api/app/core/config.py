@@ -23,6 +23,15 @@ class Settings(BaseSettings):
     app_name: str = "Price Action Learning Lab"
     debug: bool = True
 
+    # 认证：开发模式允许无 token 的旧 Web 自动映射到 legacy local user。
+    auth_token_secret: str | None = None
+    auth_token_ttl_seconds: int = 7 * 24 * 60 * 60
+    legacy_local_user_enabled: bool = True
+    wechat_app_id: str | None = None
+    wechat_app_secret: str | None = None
+    wechat_allowed_openids: str = ""
+    wechat_code2session_url: str = "https://api.weixin.qq.com/sns/jscode2session"
+
     # 本地数据目录（默认仓库 data/）
     data_dir: Path = REPO_ROOT / "data"
 

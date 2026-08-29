@@ -36,11 +36,31 @@ export interface ChartMarker {
     | "micro_channel";
 }
 
+/** 图表层开关（用户可自主勾选显示/隐藏；由父组件持久化到 localStorage）。 */
+export interface ChartOverlays {
+  ema5: boolean; // 5m 20 bar EMA（主图基准均线）
+  ema15: boolean; // 15m 20 bar EMA（Brooks 近似投影）
+  ema60: boolean; // 60m 20 bar EMA（Brooks 近似投影）
+  keyLevels: boolean; // PDO/PDH/PDL/PDC/OPEN/PRE-H/PRE-L 关键价位线
+  positions: boolean; // 模拟持仓线（入场/止损/目标）
+}
+
+/** 模拟持仓的价格标线（入场/止损/目标）。 */
+export interface TradeLine {
+  price: number;
+  color: string;
+  title: string;
+}
+
 interface Props {
   bars: Bar[];
   ema20: (number | null)[];
+  ema15?: (number | null)[];
+  ema60?: (number | null)[];
   keyLevels: KeyLevels | null;
   markers?: ChartMarker[];
+  overlays?: ChartOverlays;
+  tradeLines?: TradeLine[];
 }
 
 const LEVEL_STYLES: Array<{ key: keyof KeyLevels; title: string; color: string }> = [
@@ -53,11 +73,22 @@ const LEVEL_STYLES: Array<{ key: keyof KeyLevels; title: string; color: string }
   { key: "premarket_low", title: "PRE-L 盘前低", color: "#5d8a5f" },
 ];
 
-export default function CandleChart({ bars, ema20, keyLevels, markers }: Props) {
+export default function CandleChart({
+  bars,
+  ema20,
+  ema15,
+  ema60,
+  keyLevels,
+  markers,
+  overlays,
+  tradeLines,
+}: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const emaRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const ema15Ref = useRef<ISeriesApi<"Line"> | null>(null);
+  const ema60Ref = useRef<ISeriesApi<"Line"> | null>(null);
   const priceLinesRef = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]>[]>([]);
 
   useEffect(() => {
@@ -102,6 +133,22 @@ export default function CandleChart({ bars, ema20, keyLevels, markers }: Props) 
       lastValueVisible: false,
       title: "EMA20",
     });
+    ema15Ref.current = chart.addLineSeries({
+      color: "#4da3ff",
+      lineWidth: 1,
+      lineStyle: 0, // 实线：15m 20 bar EMA
+      priceLineVisible: false,
+      lastValueVisible: false,
+      title: "15m EMA20",
+    });
+    ema60Ref.current = chart.addLineSeries({
+      color: "#9a86c9",
+      lineWidth: 2,
+      lineStyle: 2, // 虚线：60m 20 bar EMA（对照 Brooks 课件中的虚线高周期均线）
+      priceLineVisible: false,
+      lastValueVisible: false,
+      title: "60m EMA20",
+    });
     chartRef.current = chart;
     return () => {
       chart.remove();
@@ -113,6 +160,7 @@ export default function CandleChart({ bars, ema20, keyLevels, markers }: Props) 
   useEffect(() => {
     const series = candleRef.current;
     if (!series) return;
+    const ov = overlays ?? { ema5: true, ema15: true, ema60: true, keyLevels: true, positions: true };
     series.setData(
       bars.map((b) => ({
         time: (Date.parse(b.ts_open_utc) / 1000) as Time,
@@ -122,20 +170,23 @@ export default function CandleChart({ bars, ema20, keyLevels, markers }: Props) 
         close: b.close,
       })),
     );
-    emaRef.current?.setData(
-      bars
-        .map((b, i) => ({
-          time: (Date.parse(b.ts_open_utc) / 1000) as Time,
-          value: ema20[i],
+    const toPoints = (values: (number | null)[] | undefined) =>
+      (values ?? [])
+        .map((v, i) => ({
+          time: (Date.parse(bars[i].ts_open_utc) / 1000) as Time,
+          value: v,
         }))
-        .filter((p): p is { time: Time; value: number } => p.value !== null && p.value !== undefined),
-    );
+        .filter((p): p is { time: Time; value: number } => p.value !== null && p.value !== undefined);
+
+    emaRef.current?.setData(ov.ema5 ? toPoints(ema20) : []);
+    ema15Ref.current?.setData(ov.ema15 ? toPoints(ema15) : []);
+    ema60Ref.current?.setData(ov.ema60 ? toPoints(ema60) : []);
     // 关键价位：先清旧线再画
     const chart = chartRef.current;
     if (chart) {
       for (const pl of priceLinesRef.current) series.removePriceLine(pl);
       priceLinesRef.current = [];
-      if (keyLevels) {
+      if (keyLevels && ov.keyLevels) {
         for (const s of LEVEL_STYLES) {
           const v = keyLevels[s.key];
           if (typeof v === "number") {
@@ -152,8 +203,23 @@ export default function CandleChart({ bars, ema20, keyLevels, markers }: Props) 
           }
         }
       }
+      // 模拟持仓线：入场/止损/目标（仓位管理可视化）
+      if (ov.positions) {
+        for (const tl of tradeLines ?? []) {
+          priceLinesRef.current.push(
+            series.createPriceLine({
+              price: tl.price,
+              color: tl.color,
+              lineWidth: 1,
+              lineStyle: 0,
+              axisLabelVisible: true,
+              title: tl.title,
+            }),
+          );
+        }
+      }
     }
-  }, [bars, ema20, keyLevels]);
+  }, [bars, ema20, ema15, ema60, keyLevels, overlays, tradeLines]);
 
   // 候选标记（克制样式；仅在 Predict First 解锁后由父组件传入）
   useEffect(() => {

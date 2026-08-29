@@ -1,0 +1,23 @@
+.training-screen { padding-top: 24px; }
+.topline { display: flex; align-items: center; justify-content: space-between; }
+.status-dot { color: var(--up); font-size: 17px; letter-spacing: 2px; }
+.status-dot::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: var(--up); box-shadow: 0 0 14px var(--up); }
+.hero { padding: 50px 0 32px; }
+.pulse { display: grid; grid-template-columns: 1fr 1px 1.45fr; gap: 24px; align-items: center; padding: 25px; }
+.pulse-divider { width: 1px; height: 72px; background: var(--line); }
+.protocol { display: block; margin-top: 14px; color: #cbd3da; font-size: 19px; letter-spacing: 1px; }
+.section-head { display: flex; justify-content: space-between; margin: 42px 0 18px; font-size: 26px; font-weight: 700; }
+.mode-list { display: flex; flex-direction: column; gap: 12px; }
+.mode-card { display: grid; grid-template-columns: 95px 1fr 30px; gap: 16px; align-items: center; min-height: 110px; padding: 20px; border: 1px solid var(--line); background: rgba(15,21,29,.8); }
+.mode-card.selected { border-color: var(--acid); background: linear-gradient(90deg, rgba(215,255,63,.1), rgba(15,21,29,.9) 42%); box-shadow: inset 4px 0 var(--acid); }
+.mode-code { color: var(--muted); font-size: 18px; letter-spacing: 1px; }
+.selected .mode-code, .selected .mode-check { color: var(--acid); }
+.mode-title { display: block; font-size: 28px; font-weight: 800; }
+.mode-desc { display: block; margin-top: 7px; color: var(--muted); font-size: 20px; }
+.mode-check { color: #4c5661; font-size: 22px; }
+.setup-grid { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 24px; padding: 24px; }
+.setup-grid > view { padding-left: 22px; border-left: 1px solid var(--line); }
+.setup-grid > view:first-child { padding-left: 0; border: 0; }
+.setup-value { display: block; margin-top: 10px; font-size: 25px; font-weight: 700; }
+.launch { margin-top: 26px; }
+.resume { display: flex; justify-content: space-between; margin-top: 22px; padding: 18px 0; color: #9ba6b0; font-size: 21px; border-bottom: 1px solid var(--line); }

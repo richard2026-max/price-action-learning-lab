@@ -26,14 +26,14 @@ def seed(
     seed_value: int | None = typer.Option(None, "--seed", help="覆盖默认种子"),
 ) -> None:
     """生成合成 SPY 1m 数据并聚合为 5m（幂等）。"""
-    from app.api.routes.data import seed as seed_ep  # 复用同一服务逻辑
     from app.schemas.data import SeedIn
+    from app.services.data_seed_service import run_seed
 
     settings = Settings()
-    s = seed_ep(
-        SeedIn(start=start, end=end, seed=seed_value),
+    s = run_seed(
         store=_store(settings),
         synth_seed=settings.synthetic_seed,
+        req=SeedIn(start=start, end=end, seed=seed_value),
     )
     typer.echo(
         f"交易日 {s.days} 天 | 1m {s.bars_1m} 根 (重复剔除 {s.duplicate_count_1m}) | "

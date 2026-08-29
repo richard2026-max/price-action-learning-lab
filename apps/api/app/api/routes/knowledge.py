@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
+from app.api.deps import get_current_user
 from app.core.config import Settings
+from app.models.orm import UserORM
 from app.services.knowledge_service import KnowledgeChunk, KnowledgeService
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
@@ -67,6 +69,7 @@ def get_page_image(
     book: str | None = Query(None, description="书籍或课件代号：T, R, REV, COURSE, BOOK"),
     source_file: str | None = Query(None, description="来源文件名或文件路径"),
     scale: float = Query(1.5, ge=0.5, le=3.0, description="渲染缩放比例"),
+    _user: UserORM = Depends(get_current_user),
 ) -> FileResponse:
     """渲染指定原书或课件 PDF 页面为高清晰度 JPEG 图片（支持磁盘缓存）。"""
     settings: Settings = getattr(request.app.state, "settings", Settings())
@@ -102,6 +105,7 @@ def search_knowledge(
     q: str = Query(..., min_length=1, description="检索关键词（支持多词空格分隔）"),
     books: str | None = Query(None, description="限定书籍代号，逗号分隔：T,R,REV"),
     max_results: int = Query(10, ge=1, le=50),
+    _user: UserORM = Depends(get_current_user),
 ) -> dict:
     svc = _get_service(request)
     books_list = [b.strip() for b in books.split(",")] if books else None
@@ -129,6 +133,7 @@ def search_by_concept(
     request: Request,
     term: str,
     max_results: int = Query(5, ge=1, le=20),
+    _user: UserORM = Depends(get_current_user),
 ) -> dict:
     """按 Concept Spec 英文术语名检索原书相关章节。"""
     svc = _get_service(request)

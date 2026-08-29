@@ -18,6 +18,7 @@ class ScannerRepository:
     def create_task(
         self,
         *,
+        user_id: str,
         instrument_id: str,
         provider: str,
         timeframe: str,
@@ -29,6 +30,7 @@ class ScannerRepository:
         with self._factory() as s:
             orm = ScanTaskORM(
                 id=uuid.uuid4().hex,
+                user_id=user_id,
                 instrument_id=instrument_id,
                 provider=provider,
                 timeframe=timeframe,
@@ -43,17 +45,23 @@ class ScannerRepository:
             s.refresh(orm)
             return orm
 
-    def get_task(self, task_id: str) -> ScanTaskORM | None:
+    def get_task(self, task_id: str, user_id: str | None = None) -> ScanTaskORM | None:
         with self._factory() as s:
-            orm = s.get(ScanTaskORM, task_id)
+            query = select(ScanTaskORM).where(ScanTaskORM.id == task_id)
+            if user_id is not None:
+                query = query.where(ScanTaskORM.user_id == user_id)
+            orm = s.scalar(query)
             if orm is not None:
                 s.expunge(orm)
             return orm
 
-    def list_tasks(self, limit: int = 50) -> list[ScanTaskORM]:
+    def list_tasks(self, user_id: str, limit: int = 50) -> list[ScanTaskORM]:
         with self._factory() as s:
             rows = s.scalars(
-                select(ScanTaskORM).order_by(desc(ScanTaskORM.created_at)).limit(limit)
+                select(ScanTaskORM)
+                .where(ScanTaskORM.user_id == user_id)
+                .order_by(desc(ScanTaskORM.created_at))
+                .limit(limit)
             ).all()
             for r in rows:
                 s.expunge(r)
@@ -98,9 +106,16 @@ class ScannerRepository:
             s.add_all(candidates)
             s.commit()
 
-    def get_candidate(self, candidate_id: str) -> CandidateRecordORM | None:
+    def get_candidate(self, candidate_id: str, user_id: str | None = None) -> CandidateRecordORM | None:
         with self._factory() as s:
-            orm = s.get(CandidateRecordORM, candidate_id)
+            query = (
+                select(CandidateRecordORM)
+                .join(ScanTaskORM, ScanTaskORM.id == CandidateRecordORM.task_id)
+                .where(CandidateRecordORM.id == candidate_id)
+            )
+            if user_id is not None:
+                query = query.where(ScanTaskORM.user_id == user_id)
+            orm = s.scalar(query)
             if orm is not None:
                 s.expunge(orm)
             return orm
@@ -113,9 +128,15 @@ class ScannerRepository:
         only_favorites: bool = False,
         only_mistakes: bool = False,
         limit: int = 200,
+        user_id: str | None = None,
     ) -> list[CandidateRecordORM]:
         with self._factory() as s:
-            q = select(CandidateRecordORM)
+            q = (
+                select(CandidateRecordORM)
+                .join(ScanTaskORM, ScanTaskORM.id == CandidateRecordORM.task_id)
+            )
+            if user_id is not None:
+                q = q.where(ScanTaskORM.user_id == user_id)
             if task_id:
                 q = q.where(CandidateRecordORM.task_id == task_id)
             if detector_id:
@@ -136,6 +157,7 @@ class ScannerRepository:
         self,
         candidate_id: str,
         *,
+        user_id: str,
         review_status: str,
         rejection_reason: str | None,
         review_notes: str | None,
@@ -143,7 +165,14 @@ class ScannerRepository:
         is_mistake_notebook: bool | None,
     ) -> CandidateRecordORM | None:
         with self._factory() as s:
-            orm = s.get(CandidateRecordORM, candidate_id)
+            orm = s.scalar(
+                select(CandidateRecordORM)
+                .join(ScanTaskORM, ScanTaskORM.id == CandidateRecordORM.task_id)
+                .where(
+                    CandidateRecordORM.id == candidate_id,
+                    ScanTaskORM.user_id == user_id,
+                )
+            )
             if not orm:
                 return None
             orm.review_status = review_status

@@ -90,6 +90,7 @@ class SessionInfoOut(BaseModel):
     provider: str = "synthetic"
     session_name: str = "rth"
     bar_index: int  # 训练日内的K线下标（不含上下文）
+    cursor_version: int = 0
     context_bar_count: int = 0  # 前N日上下文K线数量（bars 数组中训练日之前的K线数）
     market_time_utc: datetime
     session_close_utc: datetime | None = None
@@ -118,6 +119,8 @@ class SessionDetailOut(BaseModel):
     session_id: str
     bars: list[BarOut]  # 仅包含 ts_close_utc <= cursor bar 的K线（服务端权威裁剪）
     ema20: list[float | None]  # 与 bars 等长；由前日已收盘数据预热（无前视），预热不足时早期为 None
+    ema15: list[float | None] = []  # Brooks 近似：15 分钟 20 bar EMA 投影到 5m 图（每 3 根更新一次，桶内持平）
+    ema60: list[float | None] = []  # Brooks 近似：60 分钟 20 bar EMA 投影到 5m 图（每 12 根更新一次，桶内持平）
     key_levels: KeyLevelsOut
     info: SessionInfoOut
     candidates: list[CandidateOut] = []  # 未解锁时为空列表
@@ -125,11 +128,14 @@ class SessionDetailOut(BaseModel):
 
 class AdvanceIn(BaseModel):
     n: int = Field(1, ge=1, le=50)
+    expected_cursor_version: int | None = Field(None, ge=0)
+    request_id: str | None = Field(None, min_length=1, max_length=128)
 
 
 class JudgmentIn(BaseModel):
     """Predict First 判断表单（提交后锁定）。"""
 
+    client_request_id: str | None = Field(None, min_length=1, max_length=128)
     context_label: ContextLabel
     structure_note: str = ""
     pullback_present: Ternary = Ternary.UNKNOWN

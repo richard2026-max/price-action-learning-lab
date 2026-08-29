@@ -124,7 +124,7 @@ class ReplayService:
         return random.Random(seed).choice(days)
 
     # ---------- 会话 ----------
-    def create(self, req: CreateSessionIn, instrument: Instrument) -> SessionDetailOut:
+    def create(self, req: CreateSessionIn, instrument: Instrument, user_id: str) -> SessionDetailOut:
         from app.services.sealed_exam import is_sealed_exam_day
 
         day = _iso(req.day)
@@ -143,6 +143,7 @@ class ReplayService:
         if req.warmup_bars >= len(data.rth_bars):
             raise ReplayError("warmup_too_large", "warmup_bars 超过当日K线数", 422)
         orm = self._repo.create_session(
+            user_id=user_id,
             instrument_id=instrument.instrument_id,
             provider=instrument.provider,
             day=day,
@@ -150,60 +151,85 @@ class ReplayService:
             mode=req.mode.value,
             warmup_bars=req.warmup_bars,
         )
-        return self._detail(orm, data)
+        return self._detail(orm, data, user_id)
 
-    def get(self, session_id: str, instrument: Instrument) -> SessionDetailOut:
-        orm = self._repo.get(session_id)
+    def get(self, session_id: str, instrument: Instrument, user_id: str) -> SessionDetailOut:
+        orm = self._repo.get(session_id, user_id)
         if orm is None:
             raise ReplayError("not_found", "session 不存在", 404)
-        return self._detail(orm, self._load(instrument, orm.day))
+        return self._detail(orm, self._load(instrument, orm.day), user_id)
 
-    def advance(self, session_id: str, req: AdvanceIn, instrument: Instrument) -> SessionDetailOut:
-        orm = self._repo.get(session_id)
+    def advance(
+        self, session_id: str, req: AdvanceIn, instrument: Instrument, user_id: str
+    ) -> SessionDetailOut:
+        orm = self._repo.get(session_id, user_id)
         if orm is None:
             raise ReplayError("not_found", "session 不存在", 404)
         data = self._load(instrument, orm.day)
         last = len(data.rth_bars) - 1
+        previous_index = orm.cursor_index
+        result = self._repo.advance(
+            session_id=session_id,
+            user_id=user_id,
+            n=req.n,
+            last_index=last,
+            expected_cursor_version=req.expected_cursor_version,
+            request_id=req.request_id,
+        )
+        if result is None:
+            raise ReplayError("not_found", "session 不存在", 404)
+        if result.request_mismatch:
+            raise ReplayError("idempotency_mismatch", "request_id 已用于不同的推进请求", 409)
+        if result.version_conflict:
+            raise ReplayError("cursor_version_conflict", "会话已在其他请求中推进，请刷新后重试", 409)
+        orm = result.session
 
-        target_index = min(orm.cursor_index + req.n, last)
-
-        if self._trade_service and hasattr(self._trade_service, "process_bar_advancement"):
-            for step_idx in range(orm.cursor_index + 1, target_index + 1):
+        if (
+            not result.duplicate
+            and self._trade_service
+            and hasattr(self._trade_service, "process_bar_advancement")
+        ):
+            for step_idx in range(previous_index + 1, orm.cursor_index + 1):
                 step_bar = data.rth_bars[step_idx]
                 self._trade_service.process_bar_advancement(session_id, step_bar, step_idx)
 
-        orm.cursor_index = target_index
-        if orm.cursor_index >= last:
-            orm.state = "completed"
-        self._repo.update(orm)
-        return self._detail(orm, data)
+        return self._detail(orm, data, user_id)
 
-    def back(self, session_id: str, instrument: Instrument) -> SessionDetailOut:
-        orm = self._repo.get(session_id)
+    def back(self, session_id: str, instrument: Instrument, user_id: str) -> SessionDetailOut:
+        orm = self._repo.get(session_id, user_id)
         if orm is None:
             raise ReplayError("not_found", "session 不存在", 404)
         if orm.mode != "free":
             raise ReplayError("back_forbidden", "仅 free 模式允许回看上一根", 403)
         orm.cursor_index = max(orm.warmup_bars, orm.cursor_index - 1)
         orm.state = "running"
-        self._repo.update(orm)
-        return self._detail(orm, self._load(instrument, orm.day))
+        self._repo.update(orm, user_id, bump_cursor_version=True)
+        return self._detail(orm, self._load(instrument, orm.day), user_id)
 
     # ---------- 判断与标注 ----------
-    def submit_judgment(self, session_id: str, req: JudgmentIn, instrument: Instrument):
-        orm = self._repo.get(session_id)
+    def submit_judgment(
+        self, session_id: str, req: JudgmentIn, instrument: Instrument, user_id: str
+    ):
+        orm = self._repo.get(session_id, user_id)
         if orm is None:
             raise ReplayError("not_found", "session 不存在", 404)
         data = self._load(instrument, orm.day)
         cursor_bar = data.rth_bars[orm.cursor_index]
-        j = self._repo.add_judgment(
-            session_id=orm.id, bar_index=orm.cursor_index, bar_time_utc=cursor_bar.ts_close_utc,
-            payload=req.model_dump(mode="json"),
+        payload = req.model_dump(mode="json", exclude={"client_request_id"})
+        judgment, _duplicate = self._repo.add_judgment(
+            session_id=orm.id,
+            user_id=user_id,
+            bar_index=orm.cursor_index,
+            bar_time_utc=cursor_bar.ts_close_utc,
+            payload=payload,
+            client_request_id=req.client_request_id,
         )
-        return j
+        return judgment
 
-    def add_annotation(self, session_id: str, req: AnnotationIn, instrument: Instrument):
-        orm = self._repo.get(session_id)
+    def add_annotation(
+        self, session_id: str, req: AnnotationIn, instrument: Instrument, user_id: str
+    ):
+        orm = self._repo.get(session_id, user_id)
         if orm is None:
             raise ReplayError("not_found", "session 不存在", 404)
         data = self._load(instrument, orm.day)
@@ -211,26 +237,26 @@ class ReplayService:
             raise ReplayError("future_bar", "不能标注 cursor 之后的K线", 403)
         bar = data.rth_bars[req.bar_index]
         return self._repo.add_annotation(
-            orm.id, req.bar_index, bar.ts_close_utc, req.kind, req.label, req.text
+            orm.id, user_id, req.bar_index, bar.ts_close_utc, req.kind, req.label, req.text
         )
 
-    def delete_judgment(self, session_id: str, judgment_id: int) -> bool:
-        orm = self._repo.get(session_id)
+    def delete_judgment(self, session_id: str, judgment_id: int, user_id: str) -> bool:
+        orm = self._repo.get(session_id, user_id)
         if orm is None:
             raise ReplayError("not_found", "session 不存在", 404)
-        deleted = self._repo.delete_judgment(session_id, judgment_id)
+        deleted = self._repo.delete_judgment(session_id, judgment_id, user_id)
         if not deleted:
             raise ReplayError("not_found", "judgment 不存在", 404)
         return True
 
-    def delete_session(self, session_id: str) -> bool:
-        deleted = self._repo.delete_session(session_id)
+    def delete_session(self, session_id: str, user_id: str) -> bool:
+        deleted = self._repo.delete_session(session_id, user_id)
         if not deleted:
             raise ReplayError("not_found", "session 不存在", 404)
         return True
 
     # ---------- 视图组装（context_bars + 训练日可见bars） ----------
-    def _detail(self, orm, data: _DayData) -> SessionDetailOut:
+    def _detail(self, orm, data: _DayData, user_id: str) -> SessionDetailOut:
         from app.schemas.replay import CandidateOut
         from app.services.detector_service import compute_candidates
 
@@ -241,7 +267,7 @@ class ReplayService:
 
         # Predict First：会话存在已提交判断才解锁系统候选
         candidates: list[CandidateOut] = []
-        if self._repo.list_judgments(orm.id):
+        if self._repo.list_judgments(orm.id, user_id):
             candidates = [
                 CandidateOut(
                     detector_id=c.detector_id, detector_version=c.detector_version,
@@ -268,12 +294,15 @@ class ReplayService:
                 for b in all_visible
             ],
             ema20=self._ema_for_all(data, orm.cursor_index),
+            ema15=self._higher_tf_ema20(all_visible, bucket_bars=3),
+            ema60=self._higher_tf_ema20(all_visible, bucket_bars=12),
             key_levels=key_levels,
             info=SessionInfoOut(
                 day=orm.day.isoformat(),
                 provider=orm.provider,
                 session_name="rth",
                 bar_index=orm.cursor_index,
+                cursor_version=orm.cursor_version,
                 context_bar_count=context_count,
                 market_time_utc=bar.ts_close_utc,
                 session_close_utc=data.session_close_utc,
@@ -332,6 +361,48 @@ class ReplayService:
 
         while len(out) < len(all_closes):
             out.insert(0, None)
+
+        return out
+
+    @staticmethod
+    def _higher_tf_ema20(bars: list, bucket_bars: int) -> list[float | None]:
+        """Brooks 课件近似：把更高周期（15m/60m）的 20 bar EMA 投影到 5m 图。
+
+        语义（对照 Brooks Trading Course 的 TradeStation 指标）：
+        - 以每个交易日的开盘为基准，每 bucket_bars 根 5m K 线构成一个高周期桶
+          （15m→3 根，60m→12 根）；
+        - 仅在每桶最后一根收盘时用该收盘价更新一次 EMA20（alpha=2/21）；
+        - 桶内其余 5m K 线沿用桶边界值（持平阶梯线），绝不使用未来数据；
+        - 桶序列前 20 个收盘的 SMA 作为 EMA 种子；不足 20 个时用已有桶收盘
+          的均值提前起步，随桶数增加自然收敛。
+        """
+        if bucket_bars <= 0 or not bars:
+            return [None] * len(bars)
+
+        k = 2.0 / 21.0
+        out: list[float | None] = []
+        ema: float | None = None
+        seed_closes: list[float] = []
+        bar_in_day = 0
+        current_day = None
+
+        for b in bars:
+            day = b.ts_open_utc.date()
+            if day != current_day:
+                current_day = day
+                bar_in_day = 0
+            is_bucket_close = (bar_in_day + 1) % bucket_bars == 0
+            if is_bucket_close:
+                if ema is None:
+                    seed_closes.append(b.close)
+                    if len(seed_closes) >= 20:
+                        ema = sum(seed_closes[-20:]) / 20.0
+                    else:
+                        ema = sum(seed_closes) / len(seed_closes)
+                else:
+                    ema = b.close * k + ema * (1 - k)
+            out.append(round(ema, 4) if ema is not None else None)
+            bar_in_day += 1
 
         return out
 

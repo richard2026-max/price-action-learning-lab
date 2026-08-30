@@ -509,6 +509,9 @@ export default function ReplayWorkbench() {
   }, [msg]);
 
   useEffect(() => {
+    // 切换数据源后原交易日不再属于新数据集（如 2024-01-10 只存在于合成数据），
+    // 必须清空，否则下拉框显示占位但按钮仍带着旧值可点，报出费解的 no_data
+    setDay("");
     listDays(provider).then(setDays).catch((e) => setMsg(`获取日期失败：${e}`));
   }, [provider]);
 

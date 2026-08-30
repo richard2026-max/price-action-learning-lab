@@ -666,6 +666,144 @@ table.kv td:last-child {
   white-space: nowrap;
 }
 
+/* 画线设置面板（双击画线打开） */
+.draw-settings {
+  position: absolute;
+  top: 84px;
+  right: 14px;
+  z-index: 46;
+  width: 320px;
+  max-height: calc(100% - 110px);
+  display: flex;
+  flex-direction: column;
+  background: rgba(13, 17, 23, 0.97);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+}
+.draw-settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.ds-close {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 11px;
+  color: var(--fg-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.ds-close:hover {
+  color: #ef5350;
+}
+.draw-settings-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+.ds-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--fg-secondary);
+}
+.ds-row input[type="number"] {
+  width: 90px;
+  padding: 3px 6px;
+  font-size: 11.5px;
+  background: var(--bg-surface-2, #161b22);
+  color: var(--fg-primary, #e6edf3);
+  border: 1px solid var(--border-default);
+  border-radius: 5px;
+}
+.ds-head-row {
+  font-size: 10px;
+  color: var(--fg-muted);
+  padding-top: 2px;
+}
+.ds-label {
+  width: 32px;
+  flex-shrink: 0;
+  color: var(--fg-muted);
+}
+.ds-hint {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--fg-muted);
+}
+.ds-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 2px solid transparent;
+  flex-shrink: 0;
+}
+.ds-swatch.on {
+  border-color: #e6edf3;
+}
+.ds-levels {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.ds-level-row {
+  display: grid;
+  grid-template-columns: 18px 1fr 70px 22px;
+  align-items: center;
+  gap: 6px;
+}
+.ds-level-row input[type="number"] {
+  width: 100%;
+}
+.ds-price {
+  font-size: 11px;
+  color: var(--fg-secondary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.ds-remove {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.ds-remove:hover {
+  color: #ef5350;
+  border-color: #ef5350;
+}
+.ds-inline-actions {
+  display: flex;
+  gap: 6px;
+}
+.ds-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 9px 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
 /* 指标图层面板：分组与关键价位细粒度开关 */
 .overlay-group {
   display: flex;

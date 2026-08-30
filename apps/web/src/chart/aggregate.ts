@@ -11,13 +11,15 @@
 
 import type { Bar } from "../api/client";
 
-export type Timeframe = "5m" | "15m" | "60m" | "1d";
+export type Timeframe = "5m" | "15m" | "60m" | "4h" | "1d" | "1w";
 
 export const TIMEFRAMES: Array<{ key: Timeframe; label: string }> = [
   { key: "5m", label: "5分" },
   { key: "15m", label: "15分" },
   { key: "60m", label: "60分" },
+  { key: "4h", label: "4小时" },
   { key: "1d", label: "日线" },
+  { key: "1w", label: "周线" },
 ];
 
 export interface AggBar {
@@ -105,6 +107,21 @@ export function aggregateBars(bars: Bar[], tf: Timeframe): AggregatedSeries {
     const d = new Date(sec * 1000);
     const day = dateFmt.format(d);
     if (tf === "1d") return day;
+    if (tf === "1w") {
+      // ET 日历周（周一开始）：由 ET 日期反推所在周的周一
+      const [y, m, dd] = day.split("-").map(Number);
+      const t = Date.UTC(y, m - 1, dd);
+      const dow = new Date(t).getUTCDay(); // 0=周日
+      const monday = new Date(t - ((dow + 6) % 7) * 86400000);
+      return `W${monday.getUTCFullYear()}-${String(monday.getUTCMonth() + 1).padStart(2, "0")}-${String(
+        monday.getUTCDate(),
+      ).padStart(2, "0")}`;
+    }
+    if (tf === "4h") {
+      // 4 小时桶从 09:30 (ET) 开盘对齐：09:30-13:30 / 13:30-16:00
+      const mins = Number(hourFmt.format(d)) * 60 + Number(minuteFmt.format(d));
+      return `${day}#${Math.floor((mins - 570) / 240)}`;
+    }
     const h = hourFmt.format(d);
     if (tf === "60m") return `${day} ${h}`;
     const m = Math.floor(Number(minuteFmt.format(d)) / 15);

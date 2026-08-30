@@ -126,7 +126,7 @@ export interface TradeLine {
 // 画线：类型与样式（参考 TradingView）
 // ---------------------------------------------------------------------------
 
-export type DrawTool = "none" | "hline" | "trend" | "ray" | "rect" | "fib" | "erase";
+export type DrawTool = "none" | "hline" | "trend" | "ray" | "rect" | "fib" | "pos" | "erase";
 
 /** 画线锚点：5m 逻辑索引 + 价格（与显示周期无关，切周期后仍粘在原 K 线） */
 interface DrawPt {
@@ -134,9 +134,17 @@ interface DrawPt {
   p: number;
 }
 
+/** 斐波那契水平（每条画线可自定义：比例 + 启用） */
+interface FibLevel {
+  r: number;
+  on: boolean;
+}
+
 type Drawing =
-  | { id: string; type: "hline"; price: number }
-  | { id: string; type: "trend" | "ray" | "rect" | "fib"; a: DrawPt; b: DrawPt };
+  | { id: string; type: "hline"; price: number; color?: string }
+  | { id: string; type: "trend" | "ray" | "rect"; a: DrawPt; b: DrawPt; color?: string }
+  | { id: string; type: "fib"; a: DrawPt; b: DrawPt; color?: string; levels?: FibLevel[] }
+  | { id: string; type: "pos"; a: DrawPt; b: DrawPt; color?: string; targets?: number[] };
 
 /** 悬停命中部位：a/b = 端点手柄，body = 线条/内部（整体拖动） */
 type HoverPart = "a" | "b" | "body";
@@ -151,18 +159,35 @@ const DRAW_COLORS: Record<Drawing["type"], string> = {
   ray: "#4da3ff",
   rect: "#c05fd8",
   fib: "#e8a33d",
+  pos: "#26a69a",
 };
 
-/** 斐波那契回撤位（含 TradingView 常用扩展位，用于止盈/盈亏比推演） */
-const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618, 2.618, 3.618, 4.236];
-const FIB_FILL_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+const LEVEL_PALETTE = ["#ef5350", "#f0b90b", "#26a69a", "#4da3ff", "#9a86c9", "#e8a33d", "#7ee2a8", "#c05fd8"];
 
+const DEFAULT_FIB_RATIOS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618, 2.618, 3.618, 4.236];
+const DEFAULT_FIB_LEVELS: FibLevel[] = DEFAULT_FIB_RATIOS.map((r) => ({ r, on: true }));
+const DEFAULT_POS_TARGETS = [1, 2, 3];
+
+/** 设置面板草稿（确认后才写回画线对象） */
+interface SettingsDraft {
+  color?: string;
+  price?: number;
+  levels?: FibLevel[];
+  targets?: number[];
+}
+
+const levelsOf = (d: Drawing): FibLevel[] => (d.type === "fib" ? d.levels ?? DEFAULT_FIB_LEVELS : []);
+const targetsOf = (d: Drawing): number[] => (d.type === "pos" ? d.targets ?? DEFAULT_POS_TARGETS : []);
+const colorOf = (d: Drawing): string => d.color ?? DRAW_COLORS[d.type];
+
+/** 斐波那契回撤位（含 TradingView 常用扩展位，用于止盈/盈亏比推演） */
 const DRAW_TOOLS: Array<{ key: DrawTool; icon: string; title: string }> = [
-  { key: "hline", icon: "─", title: "水平线（点击放置；悬停线条后可上下拖动）" },
-  { key: "trend", icon: "╱", title: "趋势线（两点线段；悬停可整体拖动，拖端点圆圈微调）" },
-  { key: "ray", icon: "→", title: "射线（起点向右无限延伸；悬停可整体拖动，拖端点圆圈微调）" },
-  { key: "rect", icon: "□", title: "矩形（框选震荡区间；悬停可整体拖动，拖角上圆圈改大小）" },
-  { key: "fib", icon: "ƒ", title: "斐波那契回撤（0~1 回撤位 + 扩展位；悬停可整体拖动，拖端点圆圈调区间）" },
+  { key: "hline", icon: "─", title: "水平线（点击放置；悬停可上下拖动，双击可精确输入价位/改颜色）" },
+  { key: "trend", icon: "╱", title: "趋势线（两点线段；悬停可整体拖动，拖端点圆圈微调，双击改颜色）" },
+  { key: "ray", icon: "→", title: "射线（起点向右无限延伸；悬停可整体拖动，拖端点圆圈微调，双击改颜色）" },
+  { key: "rect", icon: "□", title: "矩形（框选震荡区间；悬停可整体拖动，拖角上圆圈改大小，双击改颜色）" },
+  { key: "fib", icon: "ƒ", title: "斐波那契回撤（0~1 回撤位 + 扩展位；双击可自定义水平与价位）" },
+  { key: "pos", icon: "±", title: "盈亏比仓位（第 1 点=入场价，第 2 点=止损价；自动识别多空，标出各 R 盈亏比目标位；双击可自定义目标 R）" },
   { key: "erase", icon: "⌫", title: "删除画线（点击要删除的画线）" },
 ];
 
@@ -173,6 +198,7 @@ const TOOL_HINTS: Record<DrawTool, string> = {
   ray: "射线：点第 1 下定起点，再点 1 下定延伸方向 · Esc 取消",
   rect: "矩形：点第 1 个对角，再点对角完成 · Esc 取消",
   fib: "斐波那契：点第 1 下（如波段低点），再点终点（如高点），0 位于终点 · Esc 取消",
+  pos: "盈亏比仓位：点第 1 下定入场价，再点 1 下定止损价（止损低于入场=做多，反之做空）· Esc 取消",
   erase: "删除画线：点击要删除的线条",
 };
 
@@ -306,6 +332,9 @@ export default function CandleChart({
   const [hover, setHover] = useState<HoverHit | null>(null);
   const [eraseHoverId, setEraseHoverId] = useState<string | null>(null);
   const [drag, setDrag] = useState<HoverHit | null>(null);
+  // 画线设置面板（双击打开；草稿确认后生效）
+  const [settingsId, setSettingsId] = useState<string | null>(null);
+  const [settingsDraft, setSettingsDraft] = useState<SettingsDraft | null>(null);
 
   // 最新值 refs（供订阅回调 / canvas 渲染读取，避免闭包过期）
   const barsRef = useRef(bars);
@@ -320,7 +349,7 @@ export default function CandleChart({
   const hoverRef = useRef<HoverHit | null>(hover);
   const eraseHoverRef = useRef<string | null>(eraseHoverId);
   const dragRef = useRef<{ id: string; part: HoverPart; startPt: DrawPt; orig: Drawing } | null>(null);
-  const draftRef = useRef<{ type: "trend" | "ray" | "rect" | "fib"; a: DrawPt } | null>(null);
+  const draftRef = useRef<{ type: "trend" | "ray" | "rect" | "fib" | "pos"; a: DrawPt } | null>(null);
   const mousePxRef = useRef<{ x: number; y: number } | null>(null);
   const mouseDrawRef = useRef<DrawPt | null>(null);
   const hoveredIdxRef = useRef<number | null>(null);
@@ -447,11 +476,33 @@ export default function CandleChart({
           const xl = Math.min(ax, bx) - 6;
           const xr = Math.max(ax, bx) + 6;
           if (pos.x < xl || pos.x > xr) continue;
-          const onLevel = FIB_LEVELS.some((r) => {
-            const y = yOfPrice(d.b.p + (d.a.p - d.b.p) * r);
-            return y != null && Math.abs(pos.y - y) <= 5;
-          });
+          const onLevel = levelsOf(d)
+            .filter((lv) => lv.on)
+            .some((lv) => {
+              const y = yOfPrice(d.b.p + (d.a.p - d.b.p) * lv.r);
+              return y != null && Math.abs(pos.y - y) <= 5;
+            });
           if (onLevel) return { id: d.id, part: "body" };
+        } else if (d.type === "pos") {
+          const x0 = Math.min(ax, bx) - 4;
+          const x1 = Math.max(ax, bx) + 4;
+          if (pos.x < x0 || pos.x > x1) continue;
+          const nearLine = (price: number, tol: number) => {
+            const y = yOfPrice(price);
+            return y != null && Math.abs(pos.y - y) <= tol;
+          };
+          // 入场/止损线或任一 R 目标线 → 整体拖动
+          if (
+            nearLine(d.a.p, 6) ||
+            nearLine(d.b.p, 6) ||
+            targetsOf(d).some((r) => nearLine(d.a.p + (d.b.p < d.a.p ? 1 : -1) * Math.abs(d.a.p - d.b.p) * r, 5))
+          ) {
+            return { id: d.id, part: "body" };
+          }
+          // 入场~止损之间的风险区内部 → 整体拖动
+          const y0 = Math.min(ay, by);
+          const y1 = Math.max(ay, by);
+          if (pos.y >= y0 && pos.y <= y1) return { id: d.id, part: "body" };
         }
       }
       return null;
@@ -549,7 +600,7 @@ export default function CandleChart({
     };
 
     const drawOne = (d: Drawing, glow: "erase" | "move" | null, isDraft: boolean) => {
-      const color = DRAW_COLORS[d.type];
+      const color = colorOf(d);
       ctx.save();
       if (isDraft) ctx.setLineDash([5, 4]);
       const glowStroke = (trace: () => void, width: number) => {
@@ -625,31 +676,35 @@ export default function CandleChart({
         const priceAt = (r: number) => d.b.p + (d.a.p - d.b.p) * r;
         const xl = Math.min(pts.ax, pts.bx);
         const xr = Math.max(pts.ax, pts.bx);
+        const levels = levelsOf(d).filter((lv) => lv.on);
         // 0~1 之间交替浅色带（ TradingView 风格）
-        for (let i = 0; i < FIB_FILL_LEVELS.length - 1; i++) {
-          const ya = yOfPrice(priceAt(FIB_FILL_LEVELS[i]));
-          const yb = yOfPrice(priceAt(FIB_FILL_LEVELS[i + 1]));
+        const inRange = levels.map((lv) => lv.r).filter((r) => r >= 0 && r <= 1).sort((a, b) => a - b);
+        for (let i = 0; i < inRange.length - 1; i++) {
+          const ya = yOfPrice(priceAt(inRange[i]));
+          const yb = yOfPrice(priceAt(inRange[i + 1]));
           if (ya == null || yb == null) continue;
           ctx.fillStyle = i % 2 === 0 ? hexToRgba(color, 0.05) : hexToRgba(color, 0.02);
           ctx.fillRect(xl, Math.min(ya, yb), xr - xl, Math.abs(yb - ya));
         }
-        for (const r of FIB_LEVELS) {
-          const price = priceAt(r);
+        for (const lv of levels) {
+          const price = priceAt(lv.r);
           const y = yOfPrice(price);
           if (y == null) continue;
-          const ext = r > 1;
+          const edge = lv.r === 0 || lv.r === 1;
+          const ext = lv.r < 0 || lv.r > 1;
+          const lvColor = LEVEL_PALETTE[Math.abs(Math.round(lv.r * 1000)) % LEVEL_PALETTE.length];
           ctx.setLineDash(ext ? [4, 3] : isDraft ? [5, 4] : []);
-          ctx.strokeStyle = hexToRgba(color, ext ? 0.5 : r === 0 || r === 1 ? 0.9 : 0.65);
-          ctx.lineWidth = r === 0 || r === 1 ? 1.4 : 1;
+          ctx.strokeStyle = hexToRgba(lvColor, ext ? 0.5 : edge ? 0.9 : 0.65);
+          ctx.lineWidth = edge ? 1.4 : 1;
           ctx.beginPath();
           ctx.moveTo(xl, y);
           ctx.lineTo(xr, y);
           ctx.stroke();
           ctx.setLineDash(isDraft ? [5, 4] : []);
           ctx.font = "600 10px system-ui, sans-serif";
-          ctx.fillStyle = color;
+          ctx.fillStyle = lvColor;
           ctx.textBaseline = "bottom";
-          ctx.fillText(`${r}  ${price.toFixed(2)}`, xl + 4, y - 2);
+          ctx.fillText(`${lv.r}  ${price.toFixed(2)}`, xl + 4, y - 2);
         }
         // 两锚点间的虚线（趋势方向提示）
         ctx.setLineDash([3, 3]);
@@ -660,6 +715,66 @@ export default function CandleChart({
         ctx.lineTo(pts.bx, pts.by);
         ctx.stroke();
         ctx.setLineDash([]);
+        if (!isDraft) {
+          drawAnchor(pts.ax, pts.ay, color);
+          drawAnchor(pts.bx, pts.by, color);
+        }
+      } else if (d.type === "pos") {
+        // 盈亏比仓位：入场（a.p）+ 止损（b.p）→ 1R 距离，标出各 R 目标位
+        const pts = twoPts(d);
+        if (!pts) {
+          ctx.restore();
+          return;
+        }
+        const entryY = pts.ay;
+        const stopY = pts.by;
+        const x0 = Math.min(pts.ax, pts.bx);
+        const x1 = Math.max(pts.ax, pts.bx);
+        const long = d.b.p < d.a.p;
+        const risk = Math.abs(d.a.p - d.b.p);
+        const dirLabel = long ? "多" : "空";
+        // 风险区（入场~止损之间红色浅填充）
+        ctx.fillStyle = hexToRgba("#ef5350", 0.1);
+        ctx.fillRect(x0, Math.min(entryY, stopY), x1 - x0, Math.abs(stopY - entryY));
+        // 止损线
+        glowStroke(() => {
+          ctx.beginPath();
+          ctx.moveTo(x0, stopY);
+          ctx.lineTo(x1, stopY);
+        }, 1.2);
+        // 入场线
+        ctx.strokeStyle = hexToRgba("#e6edf3", 0.85);
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(x0, entryY);
+        ctx.lineTo(x1, entryY);
+        ctx.stroke();
+        // 各 R 目标线（盈亏比）
+        const lineLabel = (text: string, y: number, bg: string, fg: string) => {
+          ctx.font = "600 10px system-ui, sans-serif";
+          const tw = ctx.measureText(text).width + 8;
+          ctx.fillStyle = bg;
+          roundRectPath(ctx, x0 + 2, y - 8, tw, 14, 3);
+          ctx.fill();
+          ctx.fillStyle = fg;
+          ctx.textBaseline = "middle";
+          ctx.fillText(text, x0 + 6, y - 0.5);
+        };
+        lineLabel(`入场 ${dirLabel} ${d.a.p.toFixed(2)}`, entryY, "#2d3642", "#e6edf3");
+        lineLabel(`止损 ${d.b.p.toFixed(2)}`, stopY, hexToRgba("#ef5350", 0.85), "#ffffff");
+        for (const r of targetsOf(d)) {
+          const price = d.a.p + (long ? 1 : -1) * risk * r;
+          const y = yOfPrice(price);
+          if (y == null) continue;
+          ctx.setLineDash(isDraft ? [5, 4] : []);
+          ctx.strokeStyle = hexToRgba("#26a69a", 0.8);
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(x0, y);
+          ctx.lineTo(x1, y);
+          ctx.stroke();
+          lineLabel(`${r}R（盈亏比 ${r}） ${price.toFixed(2)}`, y, hexToRgba("#26a69a", 0.9), "#ffffff");
+        }
         if (!isDraft) {
           drawAnchor(pts.ax, pts.ay, color);
           drawAnchor(pts.bx, pts.by, color);
@@ -995,27 +1110,30 @@ export default function CandleChart({
     }
   };
 
-  // Esc 取消进行中的绘制 / 退出工具
+  // Esc 取消进行中的绘制 / 退出工具 / 关闭画线设置
   useEffect(() => {
-    if (tool === "none") return;
+    if (tool === "none" && !settingsId) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setTool("none");
+      if (e.key !== "Escape") return;
+      if (settingsId) closeSettings();
+      else setTool("none");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [tool]);
+  }, [tool, settingsId]);
 
   // ---- 画布交互 ----
-  // 拖拽期间在 window 上监听松开（快速拖动可能移出画布）
+  // mouseup 常驻监听：快速按下-抬起时 mouseup 可能先于 effect 挂载到达，
+  // 条件挂载会导致 dragRef 永久卡死（悬停/点击全部失效）
   useEffect(() => {
-    if (!drag) return;
     const end = () => {
+      if (!dragRef.current) return;
       dragRef.current = null;
       setDrag(null);
     };
     window.addEventListener("mouseup", end);
     return () => window.removeEventListener("mouseup", end);
-  }, [drag]);
+  }, []);
 
   const pointFromEvent = (e: React.MouseEvent<HTMLCanvasElement>): { pos: { x: number; y: number }; pt: DrawPt | null } | null => {
     const canvas = canvasRef.current;
@@ -1050,6 +1168,66 @@ export default function CandleChart({
         };
       }),
     );
+  };
+
+  // ---- 画线设置面板 ----
+  const closeSettings = () => {
+    setSettingsId(null);
+    setSettingsDraft(null);
+  };
+
+  const openSettings = (id: string) => {
+    const d = drawingsRef.current.find((x) => x.id === id);
+    if (!d) return;
+    setSettingsId(id);
+    setSettingsDraft({
+      color: d.color,
+      price: d.type === "hline" ? d.price : undefined,
+      levels: d.type === "fib" ? levelsOf(d).map((lv) => ({ ...lv })) : undefined,
+      targets: d.type === "pos" ? [...targetsOf(d)] : undefined,
+    });
+  };
+
+  const applySettings = () => {
+    const dr = settingsDraft;
+    if (!settingsId || !dr) {
+      closeSettings();
+      return;
+    }
+    setDrawings((prev) =>
+      prev.map((d): Drawing => {
+        if (d.id !== settingsId) return d;
+        let next: Drawing = { ...d, color: dr.color };
+        if (next.type === "hline" && typeof dr.price === "number" && Number.isFinite(dr.price)) {
+          next = { ...next, price: dr.price };
+        }
+        if (next.type === "fib") {
+          next = {
+            ...next,
+            levels: (dr.levels ?? [])
+              .map((lv) => ({ r: Number(lv.r), on: lv.on }))
+              .filter((lv) => Number.isFinite(lv.r)),
+          };
+        }
+        if (next.type === "pos") {
+          next = {
+            ...next,
+            targets: (dr.targets ?? []).map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0),
+          };
+        }
+        return next;
+      }),
+    );
+    closeSettings();
+  };
+
+  const onCanvasDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (toolRef.current !== "none") return;
+    const res = pointFromEvent(e);
+    if (!res?.pt) return;
+    const hit = hitTestEx(res.pos);
+    if (!hit) return;
+    openSettings(hit.id);
   };
 
   const onCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -1153,6 +1331,7 @@ export default function CandleChart({
         onMouseDown={onCanvasMouseDown}
         onMouseLeave={onCanvasMouseLeave}
         onClick={onCanvasClick}
+        onDoubleClick={onCanvasDoubleClick}
       />
 
       {ov.ohlcLegend && legend && (
@@ -1209,13 +1388,14 @@ export default function CandleChart({
               className={`tf-btn ${tf === t.key ? "active" : ""}`}
               onClick={() => changeTf(t.key)}
               title={
-                t.key === "5m"
-                  ? "5 分钟（回放主周期）"
-                  : t.key === "15m"
-                  ? "15 分钟（Brooks 常用高周期）"
-                  : t.key === "60m"
-                  ? "60 分钟（找支撑阻力 / 相似形态）"
-                  : "日线（大级别支撑阻力）"
+                ({
+                  "5m": "5 分钟（回放主周期）",
+                  "15m": "15 分钟（Brooks 常用高周期）",
+                  "60m": "60 分钟（找支撑阻力 / 相似形态）",
+                  "4h": "4 小时（大周期支撑阻力，09:30 开盘对齐）",
+                  "1d": "日线（大级别支撑阻力）",
+                  "1w": "周线（最大级别趋势与形态）",
+                } as Record<string, string>)[t.key] ?? t.label
               }
             >
               {t.label}
@@ -1239,6 +1419,197 @@ export default function CandleChart({
         </button>
       </div>
       {tool !== "none" && <div className="draw-hint">{TOOL_HINTS[tool]}</div>}
+      {tool === "none" && !settingsId && drawings.length > 0 && (
+        <div className="draw-hint">双击画线可打开设置：精确价位 / 斐波那契水平 / 盈亏比目标 / 颜色</div>
+      )}
+
+      {settingsId &&
+        settingsDraft &&
+        (() => {
+          const d = drawings.find((x) => x.id === settingsId);
+          if (!d) return null;
+          const patch = (fn: (p: SettingsDraft) => SettingsDraft) => setSettingsDraft((p) => (p ? fn(p) : p));
+          const title =
+            d.type === "fib"
+              ? "斐波那契回撤 · 设置"
+              : d.type === "pos"
+              ? "盈亏比仓位 · 设置"
+              : d.type === "hline"
+              ? "水平线 · 设置"
+              : "画线 · 设置";
+          return (
+            <div className="draw-settings">
+              <div className="draw-settings-head">
+                <span>{title}</span>
+                <button className="ds-close" onClick={closeSettings} aria-label="关闭">
+                  ✕
+                </button>
+              </div>
+              <div className="draw-settings-body">
+                <div className="ds-row">
+                  <span className="ds-label">颜色</span>
+                  <span
+                    className={`ds-swatch ${!settingsDraft.color ? "on" : ""}`}
+                    style={{ background: DRAW_COLORS[d.type] }}
+                    onClick={() => patch((p) => ({ ...p, color: undefined }))}
+                    title="默认色"
+                  />
+                  {LEVEL_PALETTE.map((c) => (
+                    <span
+                      key={c}
+                      className={`ds-swatch ${settingsDraft.color === c ? "on" : ""}`}
+                      style={{ background: c }}
+                      onClick={() => patch((p) => ({ ...p, color: c }))}
+                    />
+                  ))}
+                </div>
+
+                {d.type === "hline" && (
+                  <div className="ds-row">
+                    <span className="ds-label">价位</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={settingsDraft.price ?? 0}
+                      onChange={(e) => patch((p) => ({ ...p, price: Number(e.target.value) }))}
+                    />
+                  </div>
+                )}
+
+                {d.type === "fib" && settingsDraft.levels && (
+                  <>
+                    <div className="ds-row ds-head-row">
+                      <span>显示</span>
+                      <span>比例</span>
+                      <span>价位</span>
+                      <span />
+                    </div>
+                    <div className="ds-levels">
+                      {settingsDraft.levels.map((lv, i) => {
+                        const price = d.b.p + (d.a.p - d.b.p) * lv.r;
+                        return (
+                          <div className="ds-level-row" key={i}>
+                            <input
+                              type="checkbox"
+                              checked={lv.on}
+                              onChange={(e) =>
+                                patch((p) => ({
+                                  ...p,
+                                  levels: (p.levels ?? []).map((x, j) => (j === i ? { ...x, on: e.target.checked } : x)),
+                                }))
+                              }
+                            />
+                            <input
+                              type="number"
+                              step="0.001"
+                              value={lv.r}
+                              onChange={(e) =>
+                                patch((p) => ({
+                                  ...p,
+                                  levels: (p.levels ?? []).map((x, j) => (j === i ? { ...x, r: Number(e.target.value) } : x)),
+                                }))
+                              }
+                            />
+                            <span className="ds-price">{Number.isFinite(price) ? price.toFixed(2) : "—"}</span>
+                            <button
+                              className="ds-remove"
+                              title="删除该水平"
+                              onClick={() => patch((p) => ({ ...p, levels: (p.levels ?? []).filter((_, j) => j !== i) }))}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="ds-inline-actions">
+                      <button
+                        className="small ghost"
+                        onClick={() => patch((p) => ({ ...p, levels: [...(p.levels ?? []), { r: 0, on: true }] }))}
+                      >
+                        + 添加水平
+                      </button>
+                      <button
+                        className="small ghost"
+                        onClick={() => patch((p) => ({ ...p, levels: DEFAULT_FIB_LEVELS.map((lv) => ({ ...lv })) }))}
+                      >
+                        恢复默认
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {d.type === "pos" && settingsDraft.targets && (
+                  <>
+                    <div className="ds-row">
+                      <span className="ds-label">方向</span>
+                      <b>{d.b.p < d.a.p ? "做多" : "做空"}</b>
+                      <span className="ds-hint">1R = {Math.abs(d.a.p - d.b.p).toFixed(2)}</span>
+                    </div>
+                    <div className="ds-row ds-head-row">
+                      <span>目标 R（盈亏比）</span>
+                      <span>价位</span>
+                      <span />
+                    </div>
+                    <div className="ds-levels">
+                      {settingsDraft.targets.map((r, i) => {
+                        const price = d.a.p + (d.b.p < d.a.p ? 1 : -1) * Math.abs(d.a.p - d.b.p) * r;
+                        return (
+                          <div className="ds-level-row" key={i}>
+                            <input
+                              type="number"
+                              step="0.1"
+                              value={r}
+                              onChange={(e) =>
+                                patch((p) => ({
+                                  ...p,
+                                  targets: (p.targets ?? []).map((x, j) => (j === i ? Number(e.target.value) : x)),
+                                }))
+                              }
+                            />
+                            <span className="ds-price">{Number.isFinite(price) ? price.toFixed(2) : "—"}</span>
+                            <button
+                              className="ds-remove"
+                              title="删除该目标"
+                              onClick={() => patch((p) => ({ ...p, targets: (p.targets ?? []).filter((_, j) => j !== i) }))}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="ds-inline-actions">
+                      <button
+                        className="small ghost"
+                        onClick={() =>
+                          patch((p) => {
+                            const ts = p.targets ?? [];
+                            const next = ts.length ? Math.max(...ts) + 1 : 1;
+                            return { ...p, targets: [...ts, next] };
+                          })
+                        }
+                      >
+                        + 添加目标 R
+                      </button>
+                      <button className="small ghost" onClick={() => patch((p) => ({ ...p, targets: [...DEFAULT_POS_TARGETS] }))}>
+                        恢复默认
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="ds-footer">
+                <button className="ghost small" onClick={closeSettings}>
+                  取消
+                </button>
+                <button className="primary small" onClick={applySettings}>
+                  确认
+                </button>
+              </div>
+            </div>
+          );
+        })()}
     </div>
   );
 }

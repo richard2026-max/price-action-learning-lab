@@ -506,8 +506,186 @@ table.kv td:last-child {
 }
 
 .chart-box {
+  position: relative;
   width: 100%;
   height: 100%;
+}
+
+/* 图表内部分层：lightweight-charts 容器 / 画线画布 / 图例 / 浮动工具条 */
+.chart-inner {
+  position: absolute;
+  inset: 0;
+}
+.chart-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+}
+.chart-canvas.interactive {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+/* OKX 风格顶部图例：悬停 K 线的 开/高/低/收/涨跌幅 + EMA */
+.chart-legend {
+  position: absolute;
+  top: 48px;
+  left: 14px;
+  z-index: 30;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11.5px;
+}
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+}
+.lg-name {
+  color: #c9d1d9;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+.lg-item {
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
+}
+.lg-item i {
+  font-style: normal;
+  color: var(--fg-muted);
+}
+.lg-item b,
+.lg-ema b {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.cl-up {
+  color: #26a69a;
+}
+.cl-down {
+  color: #ef5350;
+}
+.lg-emas {
+  gap: 12px;
+}
+.lg-ema {
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
+  opacity: 0.95;
+}
+
+/* 图表右上角浮动工具条：周期切换 + 画线工具 */
+.chart-floatbar {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 6px;
+  background: rgba(16, 20, 26, 0.92);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+.tf-switch {
+  display: flex;
+  gap: 2px;
+}
+.tf-btn {
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.tf-btn:hover {
+  color: var(--accent-blue);
+}
+.tf-btn.active {
+  color: #e6edf3;
+  background: rgba(77, 163, 255, 0.18);
+  border-color: var(--accent-blue);
+}
+.floatbar-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border-default);
+  margin: 0 3px;
+}
+.draw-btn {
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--fg-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.draw-btn:hover {
+  color: var(--accent-blue);
+  border-color: var(--border-default);
+  background: var(--bg-surface-3);
+}
+.draw-btn.active {
+  color: var(--accent-blue);
+  border-color: var(--accent-blue);
+  background: rgba(77, 163, 255, 0.14);
+}
+.draw-btn.danger:hover {
+  color: #ef5350;
+  border-color: #ef5350;
+}
+.draw-hint {
+  position: absolute;
+  top: 52px;
+  right: 14px;
+  z-index: 40;
+  padding: 4px 10px;
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  background: rgba(16, 20, 26, 0.92);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* 指标图层面板：分组与关键价位细粒度开关 */
+.overlay-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.overlay-group-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--fg-muted);
+  letter-spacing: 0.5px;
+}
+.overlay-level-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 10px;
+  padding: 2px 0 2px 14px;
+}
+.overlay-item.is-disabled {
+  opacity: 0.45;
 }
 
 .statusbar {

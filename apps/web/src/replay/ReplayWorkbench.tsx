@@ -3,7 +3,14 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import CandleChart, { type ChartMarker, type ChartOverlays, type TradeLine } from "../chart/CandleChart";
+import CandleChart, {
+  KEY_LEVEL_ITEMS,
+  normalizeOverlays,
+  type ChartMarker,
+  type ChartOverlays,
+  type LevelKey,
+  type TradeLine,
+} from "../chart/CandleChart";
 import JudgmentForm from "./JudgmentForm";
 import {
   addAnnotation,
@@ -472,19 +479,11 @@ export default function ReplayWorkbench() {
   const [overlays, setOverlays] = useState<ChartOverlays>(() => {
     try {
       const raw = localStorage.getItem("pall.chartOverlays");
-      if (raw)
-        return {
-          ema5: true,
-          ema15: true,
-          ema60: true,
-          keyLevels: true,
-          positions: true,
-          ...JSON.parse(raw),
-        };
+      if (raw) return normalizeOverlays(JSON.parse(raw));
     } catch {
       /* ignore */
     }
-    return { ema5: true, ema15: true, ema60: true, keyLevels: true, positions: true };
+    return normalizeOverlays(null);
   });
   const [overlaysOpen, setOverlaysOpen] = useState(false);
   const advLock = useRef(false);
@@ -1154,28 +1153,81 @@ export default function ReplayWorkbench() {
             {overlaysOpen && (
               <div className="overlay-panel">
                 <div className="overlay-panel-title">图表图层显示开关</div>
-                {(
-                  [
-                    ["ema5", "EMA20 · 5 分钟（基准均线）", "#f0b90b"],
-                    ["ema15", "EMA20 · 15 分钟（Brooks 近似）", "#4da3ff"],
-                    ["ema60", "EMA20 · 60 分钟（Brooks 近似）", "#9a86c9"],
-                    ["keyLevels", "关键价位线（PDO/PDH/PDL/PDC/OPEN/盘前）", "#c98a4b"],
-                    ["positions", "模拟持仓线（入场/止损/目标）", "#26a69a"],
-                    ["markers", "形态识别标记（SH/SL/MC/Wedge…）", "#26a69a"],
-                  ] as Array<[keyof ChartOverlays | "markers", string, string]>
-                ).map(([key, label, color]) => {
-                  const checked = key === "markers" ? showMarkers : overlays[key];
-                  const onToggle = (v: boolean) =>
-                    key === "markers" ? setShowMarkers(v) : setOverlays((prev) => ({ ...prev, [key]: v }));
-                  return (
+                {(() => {
+                  const row = (
+                    key: Exclude<keyof ChartOverlays, "levelItems">,
+                    label: string,
+                    color?: string,
+                  ) => (
                     <label key={key} className="overlay-item">
-                      <input type="checkbox" checked={checked} onChange={(e) => onToggle(e.target.checked)} />
-                      <span className="overlay-color" style={{ background: color }} />
+                      <input
+                        type="checkbox"
+                        checked={overlays[key]}
+                        onChange={(e) => setOverlays((prev) => ({ ...prev, [key]: e.target.checked }))}
+                      />
+                      {color && <span className="overlay-color" style={{ background: color }} />}
                       {label}
                     </label>
                   );
-                })}
-                <div className="overlay-panel-hint">设置自动保存在本机浏览器，刷新后保持。</div>
+                  return (
+                    <>
+                      <div className="overlay-group">
+                        <div className="overlay-group-title">均线 EMA</div>
+                        {row("ema5", "EMA20 · 5 分钟（基准）", "#f0b90b")}
+                        {row("ema15", "EMA20 · 15 分钟（Brooks 近似）", "#4da3ff")}
+                        {row("ema60", "EMA20 · 60 分钟（Brooks 近似）", "#9a86c9")}
+                        {row("emaAxisLabels", "均线右侧数值标签")}
+                      </div>
+                      <div className="overlay-group">
+                        <div className="overlay-group-title">关键价位线</div>
+                        {row("keyLevels", "显示关键价位线（总开关）", "#c98a4b")}
+                        <div className="overlay-level-grid">
+                          {KEY_LEVEL_ITEMS.map((it) => (
+                            <label
+                              key={it.key}
+                              className={`overlay-item ${overlays.keyLevels ? "" : "is-disabled"}`}
+                            >
+                              <input
+                                type="checkbox"
+                                disabled={!overlays.keyLevels}
+                                checked={overlays.levelItems[it.key] !== false}
+                                onChange={(e) =>
+                                  setOverlays((prev) => ({
+                                    ...prev,
+                                    levelItems: { ...prev.levelItems, [it.key]: e.target.checked } as Record<
+                                      LevelKey,
+                                      boolean
+                                    >,
+                                  }))
+                                }
+                              />
+                              <span className="overlay-color" style={{ background: it.color }} />
+                              {it.label}
+                            </label>
+                          ))}
+                        </div>
+                        {row("keyLevelTitles", "价位线文字标题（如 PDH 前日高）")}
+                      </div>
+                      <div className="overlay-group">
+                        <div className="overlay-group-title">交易与辅助</div>
+                        {row("positions", "模拟持仓线（入场/止损/目标）", "#26a69a")}
+                        <label className="overlay-item">
+                          <input
+                            type="checkbox"
+                            checked={showMarkers}
+                            onChange={(e) => setShowMarkers(e.target.checked)}
+                          />
+                          <span className="overlay-color" style={{ background: "#26a69a" }} />
+                          形态识别标记（SH/SL/MC/Wedge…）
+                        </label>
+                        {row("ohlcLegend", "顶部 OHLC 实时图例")}
+                      </div>
+                    </>
+                  );
+                })()}
+                <div className="overlay-panel-hint">
+                  设置自动保存在本机浏览器，刷新后保持；周期切换与画线工具在图表右上角工具条，画线悬停可整体拖动、拖端点圆圈微调。
+                </div>
               </div>
             )}
           </div>
@@ -1188,6 +1240,7 @@ export default function ReplayWorkbench() {
             markers={chartMarkers}
             overlays={overlays}
             tradeLines={tradeLines}
+            sessionKey={detail.session_id}
           />
         </div>
 

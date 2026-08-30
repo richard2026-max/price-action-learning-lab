@@ -1,1 +1,0 @@
-{"root":["./src/app.tsx","./src/main.tsx","./src/analytics/analyticsworkbench.tsx","./src/api/client.ts","./src/chart/candlechart.tsx","./src/replay/judgmentform.tsx","./src/replay/replayworkbench.tsx","./src/scanner/scannerworkbench.tsx"],"version":"5.9.3"}

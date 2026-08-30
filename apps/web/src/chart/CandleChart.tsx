@@ -1052,10 +1052,15 @@ export default function CandleChart({
     const count = aggRef.current.bars.length;
     if (!chart || count === 0) return;
     const visible = tf === "5m" ? 90 : 48;
-    chart.timeScale().setVisibleLogicalRange({
-      from: Math.max(0, count - visible),
-      to: count + 3,
-    });
+    if (count <= visible) {
+      // 大周期 K 线很少时铺满整个图表，避免缩在中间留大片空白
+      chart.timeScale().fitContent();
+    } else {
+      chart.timeScale().setVisibleLogicalRange({
+        from: Math.max(0, count - visible),
+        to: count + 3,
+      });
+    }
   }, [tf]);
 
   // ---- 画线持久化（按会话） ----
@@ -1374,6 +1379,11 @@ export default function CandleChart({
             {tf === "5m" && ov.ema60 && legend.e60 != null && (
               <span className="lg-ema" style={{ color: "#9a86c9" }}>
                 60m EMA20 <b>{legend.e60.toFixed(2)}</b>
+              </span>
+            )}
+            {tf !== "5m" && (
+              <span className="lg-note">
+                {tfLabel} 共 {agg.bars.length} 根 · 大周期历史长度由会话「预热天数」决定（会话设置里最多 60 天）
               </span>
             )}
           </div>

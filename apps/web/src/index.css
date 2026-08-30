@@ -580,6 +580,11 @@ table.kv td:last-child {
   align-items: baseline;
   opacity: 0.95;
 }
+.lg-note {
+  font-size: 10px;
+  color: var(--fg-muted);
+  opacity: 0.9;
+}
 
 /* 图表右上角浮动工具条：周期切换 + 画线工具 */
 .chart-floatbar {

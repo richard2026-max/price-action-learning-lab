@@ -12,7 +12,7 @@ Price Action Learning Lab：本地单用户 Al Brooks 价格行为学习平台�
 # 仓库根目录（Windows）
 .\start-backend.cmd        # 后端+UI http://127.0.0.1:8000（单进程模式，伺服 apps/web/dist）
 .\start-frontend.cmd       # 仅前端开发时用（5173 热更新）
-# 测试：cd apps/api && .venv/Scripts/python -m pytest tests/   （95 通过，2026-08-28 全量实测复核）
+# 测试：cd apps/api && .venv/Scripts/python -m pytest tests/   （106 通过，2026-08-30 全量实测复核）
 # 构建前端：cd apps/web && npm run build（改前端后必须 build，否则 8000 看不到更新）
 ```
 
@@ -35,7 +35,7 @@ Price Action Learning Lab：本地单用户 Al Brooks 价格行为学习平台�
 | 文档体系（Batch 0-8 审计） | ✅ 四 canonical + 全仓一致，无 blocker |
 | Phase 0 骨架 / MVP-A 回放训练器 | ✅ 前后端完成；**真实数据已入库**（HFDL 2019-2021 共 757 交易日） |
 | MVP-B 客观K线事实 | ✅ 7 detector（anatomy/doji/trend_bar/inside/outside/ii-iii-ioi/signal_bar_evidence），判断提交后解锁 |
-| MVP-C 结构层 | ✅ 第一批：swing（右侧N=3确认）/pullback_leg（净漂移上下文）/hl_counting（H1-H4·L1-L4 状态机，second_entry 标注）；profile=mvp-c-0.1.0；前端已构建；**95 测试全绿（2026-08-28 实测复核）** |
+| MVP-C 结构层 | ✅ 第一批：swing（右侧N=3确认）/pullback_leg（净漂移上下文）/hl_counting（H1-H4·L1-L4 状态机，second_entry 标注）；profile=mvp-c-0.1.0；前端已构建；**95 测试全绿（2026-08-30 实测复核：106 passed）** |
 | OQ-01/OQ-02 | OQ-01 已验证（成交量±1% 吻合）；OQ-02 已补 H1/H2 等页码级引用（见 open-questions.md） |
 
 ## 5. 下一批工作（按序）

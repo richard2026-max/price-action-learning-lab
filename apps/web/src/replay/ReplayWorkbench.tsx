@@ -269,6 +269,8 @@ function SessionsManager({
 }) {
   const [sessions, setSessions] = useState<ReplaySessionSummary[]>([]);
   const [expanded, setExpanded] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [batchBusy, setBatchBusy] = useState(false);
 
   const load = useCallback(() => {
     listSessions(100)
@@ -280,20 +282,78 @@ function SessionsManager({
     load();
   }, [load]);
 
+  const cleanupLocal = (sid: string) => {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k.includes(sid)) localStorage.removeItem(k);
+    }
+  };
+
   const handleDelete = async (sid: string) => {
     if (!window.confirm("确定彻底删除该历史训练会话吗？\n其全部判断记录、模拟交易与笔记将被级联清空。")) return;
     try {
       const target = sessions.find((s) => s.session_id === sid);
       await deleteSession(sid, (target?.provider as Provider) ?? "synthetic");
-      for (let i = localStorage.length - 1; i >= 0; i--) {
-        const k = localStorage.key(i);
-        if (k && k.includes(sid)) localStorage.removeItem(k);
-      }
+      cleanupLocal(sid);
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(sid);
+        return next;
+      });
       setSessions((prev) => prev.filter((s) => s.session_id !== sid));
     } catch (e) {
       alert(`删除失败：${e}`);
     }
   };
+
+  const toggleSelect = (sid: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(sid)) next.delete(sid);
+      else next.add(sid);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelected((prev) => (prev.size === sessions.length ? new Set() : new Set(sessions.map((s) => s.session_id))));
+  };
+
+  const handleBatchDelete = async () => {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    const byId = new Map(sessions.map((s) => [s.session_id, s]));
+    const summary = ids
+      .map((id) => {
+        const s = byId.get(id);
+        return s ? `${s.day}（${MODE_ZH[s.mode] ?? s.mode}）` : id;
+      })
+      .join("、");
+    if (
+      !window.confirm(
+        `确定批量删除选中的 ${ids.length} 个训练会话吗？\n${summary}\n\n其全部判断记录、模拟交易与笔记将被级联清空，且不可恢复。`,
+      )
+    ) {
+      return;
+    }
+    setBatchBusy(true);
+    const failed: string[] = [];
+    for (const sid of ids) {
+      try {
+        const target = byId.get(sid);
+        await deleteSession(sid, (target?.provider as Provider) ?? "synthetic");
+        cleanupLocal(sid);
+      } catch {
+        failed.push(byId.get(sid)?.day ?? sid);
+      }
+    }
+    setBatchBusy(false);
+    setSelected(new Set());
+    load();
+    if (failed.length) alert(`以下会话删除失败：${failed.join("、")}`);
+  };
+
+  const allSelected = sessions.length > 0 && selected.size === sessions.length;
 
   return (
     <div className="sessions-manager">
@@ -304,42 +364,68 @@ function SessionsManager({
         <span className="hint">{expanded ? "收起 ▲" : "展开查看与删除 ▼"}</span>
       </div>
       {expanded && (
-        <div className="sessions-list">
-          {sessions.length === 0 ? (
-            <p className="hint">暂无历史训练会话记录。</p>
-          ) : (
-            sessions.map((s) => (
-              <div key={s.session_id} className="session-item">
-                <div className="session-info">
-                  <b>
-                    {s.day} · {MODE_ZH[s.mode] ?? s.mode}
-                  </b>
-                  <small>
-                    {s.provider} · {s.judgment_count} 条判断 · 进度第 {s.cursor_index + 1} 根 ·{" "}
-                    {s.state === "completed" ? "已完成" : "进行中"} ·{" "}
-                    {new Date(s.created_at).toLocaleString()}
-                  </small>
-                </div>
-                <div className="session-actions">
-                  <button
-                    className="small secondary"
-                    onClick={() => onResume(s.session_id, s.provider as Provider, s.day)}
-                    title="恢复并继续该历史训练会话"
-                  >
-                    ↩ 恢复训练
-                  </button>
-                  <button
-                    className="small ghost session-delete-btn"
-                    onClick={() => handleDelete(s.session_id)}
-                    title="彻底删除该会话（级联清空全部关联数据）"
-                  >
-                    🗑️ 删除
-                  </button>
-                </div>
-              </div>
-            ))
+        <>
+          {sessions.length > 0 && (
+            <div className="sessions-batch-bar">
+              <label className="overlay-item">
+                <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} />
+                全选
+              </label>
+              <span className="hint">已选 {selected.size} / {sessions.length}</span>
+              <button
+                className="small ghost session-delete-btn"
+                onClick={handleBatchDelete}
+                disabled={selected.size === 0 || batchBusy}
+                title="批量删除选中的会话（级联清空其全部关联数据）"
+              >
+                {batchBusy ? "删除中…" : `🗑️ 删除选中 (${selected.size})`}
+              </button>
+            </div>
           )}
-        </div>
+          <div className="sessions-list">
+            {sessions.length === 0 ? (
+              <p className="hint">暂无历史训练会话记录。</p>
+            ) : (
+              sessions.map((s) => (
+                <div key={s.session_id} className={`session-item ${selected.has(s.session_id) ? "session-selected" : ""}`}>
+                  <label className="session-check">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(s.session_id)}
+                      onChange={() => toggleSelect(s.session_id)}
+                    />
+                  </label>
+                  <div className="session-info">
+                    <b>
+                      {s.day} · {MODE_ZH[s.mode] ?? s.mode}
+                    </b>
+                    <small>
+                      {s.provider} · {s.judgment_count} 条判断 · 进度第 {s.cursor_index + 1} 根 ·{" "}
+                      {s.state === "completed" ? "已完成" : "进行中"} ·{" "}
+                      {new Date(s.created_at).toLocaleString()}
+                    </small>
+                  </div>
+                  <div className="session-actions">
+                    <button
+                      className="small secondary"
+                      onClick={() => onResume(s.session_id, s.provider as Provider, s.day)}
+                      title="恢复并继续该历史训练会话"
+                    >
+                      ↩ 恢复训练
+                    </button>
+                    <button
+                      className="small ghost session-delete-btn"
+                      onClick={() => handleDelete(s.session_id)}
+                      title="彻底删除该会话（级联清空全部关联数据）"
+                    >
+                      🗑️ 删除
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </>
       )}
     </div>
   );
@@ -936,13 +1022,16 @@ export default function ReplayWorkbench() {
           </div>
 
           <div className="form-group">
-            <label>预热天数 (前N日历史走势背景)</label>
+            <label>预热天数 (前N日历史走势背景，0-60)</label>
             <input
               type="number"
               min={0}
-              max={10}
+              max={60}
               value={contextDays}
-              onChange={(e) => setContextDays(Number(e.target.value) || 0)}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                setContextDays(Number.isFinite(v) ? Math.max(0, Math.min(60, Math.floor(v))) : 0);
+              }}
             />
           </div>
 

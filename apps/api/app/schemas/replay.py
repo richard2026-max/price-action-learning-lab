@@ -53,7 +53,7 @@ class CreateSessionIn(BaseModel):
     timeframe: str = "5m"
     mode: ReplayMode = ReplayMode.FREE
     warmup_bars: int = Field(6, ge=0, le=100)
-    context_days: int = Field(0, ge=0, le=10, description="加载前N个交易日的K线作为背景上下文（默认0）")
+    context_days: int = Field(0, ge=0, le=60, description="加载前N个交易日的K线作为背景上下文（默认0，上限60）")
 
 
 class BarOut(BaseModel):

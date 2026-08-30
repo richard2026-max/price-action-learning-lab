@@ -1395,6 +1395,32 @@ table.kv td:last-child {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
 }
+.session-item.session-selected {
+  border-color: var(--accent-blue);
+  background: rgba(41, 121, 255, 0.08);
+}
+.session-check {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.session-check input {
+  accent-color: var(--accent-blue);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+.sessions-batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  background: var(--bg-surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  margin-top: 10px;
+}
 .session-item b { display: block; font-size: 12.5px; color: var(--fg-primary); }
 .session-item small { display: block; margin-top: 3px; color: var(--fg-muted); font-size: 10.5px; }
 .session-actions { display: flex; align-items: center; gap: 7px; white-space: nowrap; }

@@ -15,20 +15,74 @@ import type { JudgmentPayload, Provider } from "@price-action/domain";
 
 const BASE = "/api/v1";
 
+/** 常见后端字段的中文名（用于校验错误信息）。 */
+const FIELD_ZH: Record<string, string> = {
+  context_days: "预热天数（前N日背景）",
+  warmup_bars: "当日开盘预热K线数",
+  day: "交易日",
+  mode: "训练模式",
+  provider: "行情数据源",
+  instrument_id: "标的",
+  direction: "方向",
+  stop_price: "止损价",
+  target_price: "目标价",
+  planned_entry_price: "计划入场价",
+};
+
+/** 把 pydantic 校验消息翻译成人话（中文字段名 + 约束）。 */
+function humanizeValidationItem(item: {
+  msg?: string;
+  loc?: unknown[];
+  ctx?: Record<string, unknown>;
+}): string {
+  const locs = (item.loc ?? []).filter((l): l is string => typeof l === "string" && l !== "body");
+  const field = locs.length ? FIELD_ZH[locs[locs.length - 1]] ?? locs[locs.length - 1] : "输入";
+  const ctx = item.ctx ?? {};
+  const msg = item.msg ?? "";
+  let constraint = "";
+  if (msg.includes("less than or equal to")) {
+    constraint = `不能超过 ${ctx.le ?? "?"}`;
+  } else if (msg.includes("greater than or equal to")) {
+    constraint = `不能小于 ${ctx.ge ?? "?"}`;
+  } else if (msg.includes("less than")) {
+    constraint = `必须小于 ${ctx.lt ?? "?"}`;
+  } else if (msg.includes("greater than")) {
+    constraint = `必须大于 ${ctx.gt ?? "?"}`;
+  } else if (msg.includes("valid integer") || msg.includes("valid number")) {
+    constraint = "必须是有效数字";
+  } else if (msg.includes("Value error")) {
+    return msg.replace(/^Value error,\s*/i, "").trim();
+  }
+  if (constraint) return `${field}${constraint}`;
+  return msg.replace(/^Value error,\s*/i, "").trim();
+}
+
 /** 把 FastAPI 校验错误（detail 为数组/对象）解析成人话，避免把整坨 JSON 抛给用户。 */
 function friendlyDetail(raw: unknown): string {
-  if (typeof raw === "string") return raw;
+  if (typeof raw === "string") {
+    // 兼容被二次序列化的 JSON 字符串
+    if (raw.startsWith("{") || raw.startsWith("[")) {
+      try {
+        return friendlyDetail(JSON.parse(raw));
+      } catch {
+        return raw;
+      }
+    }
+    return raw;
+  }
   if (Array.isArray(raw)) {
     return raw
-      .map((item) => {
-        const msg = (item as { msg?: string })?.msg ?? "";
-        return msg.replace(/^Value error,\s*/i, "").trim();
-      })
+      .map((item) =>
+        item && typeof item === "object"
+          ? humanizeValidationItem(item as { msg?: string; loc?: unknown[]; ctx?: Record<string, unknown> })
+          : String(item),
+      )
       .filter(Boolean)
       .join("；");
   }
   if (raw && typeof raw === "object") {
-    const obj = raw as { msg?: string; detail?: unknown };
+    const obj = raw as { msg?: string; detail?: unknown; type?: string; loc?: unknown[]; ctx?: Record<string, unknown> };
+    if (typeof obj.msg === "string" && obj.type) return humanizeValidationItem(obj as never);
     if (typeof obj.msg === "string") return obj.msg.replace(/^Value error,\s*/i, "").trim();
     if (obj.detail !== undefined) return friendlyDetail(obj.detail);
   }

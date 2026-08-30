@@ -40,6 +40,8 @@ class ReplaySessionORM(Base):
     mode: Mapped[str] = mapped_column(String(16))  # free | hidden_answer | exam
     sampling_mode: Mapped[str] = mapped_column(String(24), default="user_initiated")
     warmup_bars: Mapped[int] = mapped_column(Integer, default=6)
+    # 前N日背景K线天数（get/advance/back 需按同一口径重建视图，必须持久化）
+    context_days: Mapped[int] = mapped_column(Integer, default=0)
     cursor_index: Mapped[int] = mapped_column(Integer, default=0)
     cursor_version: Mapped[int] = mapped_column(Integer, default=0)
     state: Mapped[str] = mapped_column(String(16), default="running")  # running|completed

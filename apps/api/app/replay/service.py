@@ -150,6 +150,7 @@ class ReplayService:
             timeframe=req.timeframe,
             mode=req.mode.value,
             warmup_bars=req.warmup_bars,
+            context_days=req.context_days,
         )
         return self._detail(orm, data, user_id)
 
@@ -157,7 +158,7 @@ class ReplayService:
         orm = self._repo.get(session_id, user_id)
         if orm is None:
             raise ReplayError("not_found", "session 不存在", 404)
-        return self._detail(orm, self._load(instrument, orm.day), user_id)
+        return self._detail(orm, self._load(instrument, orm.day, context_days=orm.context_days), user_id)
 
     def advance(
         self, session_id: str, req: AdvanceIn, instrument: Instrument, user_id: str
@@ -165,7 +166,7 @@ class ReplayService:
         orm = self._repo.get(session_id, user_id)
         if orm is None:
             raise ReplayError("not_found", "session 不存在", 404)
-        data = self._load(instrument, orm.day)
+        data = self._load(instrument, orm.day, context_days=orm.context_days)
         last = len(data.rth_bars) - 1
         previous_index = orm.cursor_index
         result = self._repo.advance(
@@ -204,7 +205,7 @@ class ReplayService:
         orm.cursor_index = max(orm.warmup_bars, orm.cursor_index - 1)
         orm.state = "running"
         self._repo.update(orm, user_id, bump_cursor_version=True)
-        return self._detail(orm, self._load(instrument, orm.day), user_id)
+        return self._detail(orm, self._load(instrument, orm.day, context_days=orm.context_days), user_id)
 
     # ---------- 判断与标注 ----------
     def submit_judgment(

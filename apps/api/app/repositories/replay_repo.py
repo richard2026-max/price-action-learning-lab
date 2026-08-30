@@ -40,6 +40,7 @@ class ReplayRepository:
         timeframe: str,
         mode: str,
         warmup_bars: int,
+        context_days: int = 0,
     ) -> ReplaySessionORM:
         with self._factory() as session:
             orm = ReplaySessionORM(
@@ -51,6 +52,7 @@ class ReplayRepository:
                 timeframe=timeframe,
                 mode=mode,
                 warmup_bars=warmup_bars,
+                context_days=context_days,
                 cursor_index=warmup_bars,
                 cursor_version=0,
                 state="running",

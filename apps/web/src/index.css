@@ -657,6 +657,65 @@ table.kv td:last-child {
   cursor: default;
   pointer-events: none;
 }
+
+/* 右键菜单（画线操作） */
+.ctx-menu {
+  position: absolute;
+  z-index: 48;
+  min-width: 128px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--bg-surface-2, #161b22);
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+}
+.ctx-menu button {
+  padding: 5px 10px;
+  font-size: 11.5px;
+  text-align: left;
+  color: var(--fg-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.ctx-menu button:hover:not(:disabled) {
+  background: var(--bg-surface-3, #21262d);
+  color: var(--fg-primary, #e6edf3);
+}
+.ctx-menu button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.ctx-menu button.danger:hover {
+  color: #ef5350;
+}
+
+/* 文字标注编辑输入框（定位在锚点处） */
+.text-editor-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 47;
+}
+.text-editor {
+  position: absolute;
+  transform: translateY(-50%);
+  min-width: 160px;
+  max-width: 320px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #e6edf3;
+  background: rgba(16, 20, 26, 0.95);
+  border: 1px solid #4da3ff;
+  border-radius: 4px;
+  outline: none;
+  pointer-events: auto;
+}
 .draw-btn.danger:hover {
   color: #ef5350;
   border-color: #ef5350;

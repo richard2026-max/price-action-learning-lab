@@ -126,7 +126,7 @@ export interface TradeLine {
 // 画线：类型与样式（参考 TradingView）
 // ---------------------------------------------------------------------------
 
-export type DrawTool = "none" | "hline" | "trend" | "ray" | "rect" | "fib" | "pos" | "measure" | "erase";
+export type DrawTool = "none" | "hline" | "trend" | "ray" | "rect" | "fib" | "pos" | "measure" | "text" | "erase";
 
 /** 画线锚点：5m 逻辑索引 + 价格（与显示周期无关，切周期后仍粘在原 K 线） */
 interface DrawPt {
@@ -141,11 +141,11 @@ interface FibLevel {
 }
 
 type Drawing =
-  | { id: string; type: "hline"; price: number; color?: string }
-  | { id: string; type: "trend" | "ray" | "rect"; a: DrawPt; b: DrawPt; color?: string }
-  | { id: string; type: "measure"; a: DrawPt; b: DrawPt; color?: string }
-  | { id: string; type: "fib"; a: DrawPt; b: DrawPt; color?: string; levels?: FibLevel[] }
-  | { id: string; type: "pos"; a: DrawPt; b: DrawPt; color?: string; targets?: number[] };
+  | { id: string; type: "hline"; price: number; color?: string; locked?: boolean }
+  | { id: string; type: "trend" | "ray" | "rect" | "measure"; a: DrawPt; b: DrawPt; color?: string; locked?: boolean }
+  | { id: string; type: "text"; l: number; p: number; text: string; color?: string; locked?: boolean }
+  | { id: string; type: "fib"; a: DrawPt; b: DrawPt; color?: string; levels?: FibLevel[]; locked?: boolean }
+  | { id: string; type: "pos"; a: DrawPt; b: DrawPt; color?: string; targets?: number[]; locked?: boolean };
 
 /** 悬停命中部位：a/b = 端点手柄，body = 线条/内部（整体拖动） */
 type HoverPart = "a" | "b" | "body";
@@ -160,6 +160,7 @@ const DRAW_COLORS: Record<Drawing["type"], string> = {
   ray: "#4da3ff",
   rect: "#c05fd8",
   measure: "#e8a33d",
+  text: "#e6edf3",
   fib: "#e8a33d",
   pos: "#26a69a",
 };
@@ -176,11 +177,15 @@ interface SettingsDraft {
   price?: number;
   levels?: FibLevel[];
   targets?: number[];
+  locked?: boolean;
 }
 
 const levelsOf = (d: Drawing): FibLevel[] => (d.type === "fib" ? d.levels ?? DEFAULT_FIB_LEVELS : []);
 const targetsOf = (d: Drawing): number[] => (d.type === "pos" ? d.targets ?? DEFAULT_POS_TARGETS : []);
 const colorOf = (d: Drawing): string => d.color ?? DRAW_COLORS[d.type];
+
+/** 离屏 2D 上下文：命中测试里量文字宽度（与渲染同字体） */
+const measureCtx = document.createElement("canvas").getContext("2d");
 
 /** 斐波那契回撤位（含 TradingView 常用扩展位，用于止盈/盈亏比推演） */
 const DRAW_TOOLS: Array<{ key: DrawTool; icon: string; title: string }> = [
@@ -191,11 +196,12 @@ const DRAW_TOOLS: Array<{ key: DrawTool; icon: string; title: string }> = [
   { key: "fib", icon: "ƒ", title: "斐波那契回撤（0~1 回撤位 + 扩展位；双击可自定义水平与价位）· 快捷键 5" },
   { key: "pos", icon: "±", title: "盈亏比仓位（第 1 点=入场价，第 2 点=止损价；自动识别多空，标出各 R 盈亏比目标位；双击可自定义目标 R）· 快捷键 6" },
   { key: "measure", icon: "📐", title: "测量（第 1 点定起点，第 2 点定终点：价差 / 涨跌幅 / K 线根数 / 时长）· 快捷键 7" },
+  { key: "text", icon: "🅣", title: "文字标注（点击放置，输入文字；常用于标记 H1/H2、楔形、想法）· 快捷键 8" },
   { key: "erase", icon: "⌫", title: "删除画线（点击要删除的画线）" },
 ];
 
-/** 数字键 1-7 直达工具（顺序与工具栏一致；再按同键取消回 none） */
-const HOTKEY_TOOLS: DrawTool[] = ["hline", "trend", "ray", "rect", "fib", "pos", "measure"];
+/** 数字键 1-8 直达工具（顺序与工具栏一致；再按同键取消回 none） */
+const HOTKEY_TOOLS: DrawTool[] = ["hline", "trend", "ray", "rect", "fib", "pos", "measure", "text"];
 
 const TOOL_HINTS: Record<DrawTool, string> = {
   none: "",
@@ -206,6 +212,7 @@ const TOOL_HINTS: Record<DrawTool, string> = {
   fib: "斐波那契：点第 1 下（如波段低点），再点终点（如高点），0 位于终点 · Esc 取消",
   pos: "盈亏比仓位：点第 1 下定入场价，再点 1 下定止损价（止损低于入场=做多，反之做空）· Esc 取消",
   measure: "测量：点第 1 下定起点，再点 1 下定终点，显示价差 / 涨跌幅 / K 线根数 / 时长 · Esc 取消",
+  text: "文字标注：点击图上位置，输入文字（Esc 取消）",
   erase: "删除画线：点击要删除的线条",
 };
 
@@ -345,6 +352,9 @@ export default function CandleChart({
   const [stayMode, setStayMode] = useState<boolean>(() => localStorage.getItem("pa_stay") !== "0");
   // 撤销/重做：drawings 快照栈（栈本体在 ref；长度进 state 驱动按钮态）
   const [histLen, setHistLen] = useState({ undo: 0, redo: 0 });
+  // 隐藏全部画线（裸图对比）；文字标注编辑器（新建/修改共用）
+  const [hideDrawings, setHideDrawings] = useState(false);
+  const [textEditor, setTextEditor] = useState<{ id: string | null; l: number; p: number; value: string } | null>(null);
   // 画线设置面板（双击打开；草稿确认后生效）
   const [settingsId, setSettingsId] = useState<string | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<SettingsDraft | null>(null);
@@ -362,6 +372,8 @@ export default function CandleChart({
   const hoverRef = useRef<HoverHit | null>(hover);
   const eraseHoverRef = useRef<string | null>(eraseHoverId);
   const selectedRef = useRef<string | null>(selectedId);
+  const hideRef = useRef(hideDrawings);
+  const textEditorRef = useRef(textEditor);
   const magnetRef = useRef(magnet);
   const stayRef = useRef(stayMode);
   const undoRef = useRef<Drawing[][]>([]);
@@ -387,6 +399,8 @@ export default function CandleChart({
   hoverRef.current = hover;
   eraseHoverRef.current = eraseHoverId;
   selectedRef.current = selectedId;
+  hideRef.current = hideDrawings;
+  textEditorRef.current = textEditor;
   magnetRef.current = magnet;
   stayRef.current = stayMode;
 
@@ -545,9 +559,22 @@ export default function CandleChart({
   // ---- 画布交互：部位级命中测试（先查端点手柄，再查线体/内部） ----
   const hitTestEx = useCallback(
     (pos: { x: number; y: number }): HoverHit | null => {
-      const ds = drawingsRef.current;
+      const ds = hideRef.current ? [] : drawingsRef.current;
       for (let i = ds.length - 1; i >= 0; i--) {
         const d = ds[i];
+        if (d.locked) continue; // 锁定的画线不可拖动/悬停（右键菜单可解锁）
+        if (d.type === "text") {
+          const x = xOf5m(d.l);
+          const y = yOfPrice(d.p);
+          if (x != null && y != null && measureCtx) {
+            measureCtx.font = "600 11px system-ui, sans-serif";
+            const tw = measureCtx.measureText(d.text).width;
+            if (pos.x >= x - 4 && pos.x <= x + tw + 4 && Math.abs(pos.y - y) <= 10) {
+              return { id: d.id, part: "body" };
+            }
+          }
+          continue;
+        }
         if (d.type === "hline") {
           const y = yOfPrice(d.price);
           if (y != null && Math.abs(pos.y - y) <= 6) return { id: d.id, part: "body" };
@@ -730,7 +757,31 @@ export default function CandleChart({
         return ax == null || ay == null || bx == null || by == null ? null : { ax, ay, bx, by };
       };
 
-      if (d.type === "hline") {
+      if (d.type === "text") {
+        const x = xOf5m(d.l);
+        const y = yOfPrice(d.p);
+        if (x == null || y == null) {
+          ctx.restore();
+          return;
+        }
+        // 正在编辑的这条不画（HTML 输入框替代显示）
+        if (textEditorRef.current?.id === d.id) {
+          ctx.restore();
+          return;
+        }
+        const tColor = glow === "sel" ? "#4da3ff" : color;
+        if (glow) {
+          ctx.save();
+          ctx.strokeStyle = glow === "erase" ? "rgba(255,82,82,0.45)" : "rgba(130,180,255,0.5)";
+          ctx.lineWidth = 4;
+          ctx.strokeRect(x - 3, y - 11, ctx.measureText(d.text).width + 6, 22);
+          ctx.restore();
+        }
+        ctx.font = "600 11px system-ui, sans-serif";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = hexToRgba(tColor, isDraft ? 0.5 : 0.95);
+        ctx.fillText(d.text, x, y);
+      } else if (d.type === "hline") {
         const y = yOfPrice(d.price);
         if (y == null) {
           ctx.restore();
@@ -980,8 +1031,11 @@ export default function CandleChart({
     const eraseId = dragRef.current ? null : eraseHoverRef.current;
     const moveId = dragRef.current?.id ?? hoverRef.current?.id ?? null;
     const selId = dragRef.current ? null : selectedRef.current;
-    for (const d of drawingsRef.current) {
-      drawOne(d, eraseId === d.id ? "erase" : moveId === d.id ? "move" : selId === d.id ? "sel" : null, false);
+    // 裸图模式：隐藏全部已存画线（预览/草稿仍显示，避免「工具失灵」的错觉）
+    if (!hideRef.current) {
+      for (const d of drawingsRef.current) {
+        drawOne(d, eraseId === d.id ? "erase" : moveId === d.id ? "move" : selId === d.id ? "sel" : null, false);
+      }
     }
     if (preview) drawOne(preview, null, true);
   }, [xOf5m, yOfPrice]);
@@ -1294,6 +1348,7 @@ export default function CandleChart({
         target instanceof HTMLTextAreaElement ||
         target instanceof HTMLSelectElement ||
         (target != null && target.isContentEditable);
+      if (typing) return; // 焦点在输入框（含文字标注编辑器）：Del/Backspace/Enter 归输入框处理
       if (e.key === "Escape") {
         if (settingsId) closeSettings();
         else if (tool !== "none") setTool("none");
@@ -1301,6 +1356,8 @@ export default function CandleChart({
         return;
       }
       if ((e.key === "Delete" || e.key === "Backspace") && selectedId && !settingsId && !typing) {
+        const target = drawingsRef.current.find((d) => d.id === selectedId);
+        if (target?.locked) return; // 锁定的画线不响应 Del（先解锁）
         e.preventDefault();
         const id = selectedId;
         pushUndo();
@@ -1330,7 +1387,7 @@ export default function CandleChart({
         target instanceof HTMLTextAreaElement ||
         target instanceof HTMLSelectElement ||
         (target != null && target.isContentEditable);
-      if (typing || settingsId) return;
+      if (typing || settingsId || textEditorRef.current) return;
       if ((e.ctrlKey || e.metaKey) && !e.altKey) {
         const k = e.key.toLowerCase();
         if (k === "z") {
@@ -1352,6 +1409,11 @@ export default function CandleChart({
         setStayMode((s) => !s);
         return;
       }
+      if (e.key === "h" || e.key === "H") {
+        if (drawingsRef.current.length === 0) return;
+        setHideDrawings((v) => !v);
+        return;
+      }
       const n = Number(e.key);
       if (Number.isInteger(n) && n >= 1 && n <= HOTKEY_TOOLS.length) {
         const t = HOTKEY_TOOLS[n - 1];
@@ -1368,6 +1430,18 @@ export default function CandleChart({
     requestRedraw();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
+
+  // 裸图模式切换时重绘
+  useEffect(() => {
+    requestRedraw();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hideDrawings]);
+
+  // 文字编辑器打开/关闭时重绘（编辑中的文字由输入框替代渲染）
+  useEffect(() => {
+    requestRedraw();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [textEditor]);
 
   // ---- 画布交互 ----
   // mouseup 常驻监听：快速按下-抬起时 mouseup 可能先于 effect 挂载到达，
@@ -1415,6 +1489,10 @@ export default function CandleChart({
           const origPrice = (dg.orig as { price: number }).price;
           return { ...d, price: origPrice + dP };
         }
+        if (d.type === "text") {
+          const o = dg.orig as { l: number; p: number };
+          return { ...d, l: o.l + dL, p: o.p + dP };
+        }
         const o = dg.orig as Extract<Drawing, { a: DrawPt; b: DrawPt }>;
         if (dg.part === "a") return { ...d, a: { l: o.a.l + dL, p: o.a.p + dP } };
         if (dg.part === "b") return { ...d, b: { l: o.b.l + dL, p: o.b.p + dP } };
@@ -1436,12 +1514,18 @@ export default function CandleChart({
   const openSettings = (id: string) => {
     const d = drawingsRef.current.find((x) => x.id === id);
     if (!d) return;
+    if (d.type === "text") {
+      // 文字类型的「设置」就是编辑文字本身
+      setTextEditor({ id: d.id, l: d.l, p: d.p, value: d.text });
+      return;
+    }
     setSettingsId(id);
     setSettingsDraft({
       color: d.color,
       price: d.type === "hline" ? d.price : undefined,
       levels: d.type === "fib" ? levelsOf(d).map((lv) => ({ ...lv })) : undefined,
       targets: d.type === "pos" ? [...targetsOf(d)] : undefined,
+      locked: d.locked,
     });
   };
 
@@ -1455,7 +1539,7 @@ export default function CandleChart({
     setDrawings((prev) =>
       prev.map((d): Drawing => {
         if (d.id !== settingsId) return d;
-        let next: Drawing = { ...d, color: dr.color };
+        let next: Drawing = { ...d, color: dr.color, locked: dr.locked };
         if (next.type === "hline" && typeof dr.price === "number" && Number.isFinite(dr.price)) {
           next = { ...next, price: dr.price };
         }
@@ -1479,12 +1563,97 @@ export default function CandleChart({
     closeSettings();
   };
 
+  // ---- 文字标注编辑器（新建与修改共用；空文本=取消） ----
+  const commitTextEditor = () => {
+    const ed = textEditorRef.current;
+    if (!ed) return;
+    if (ed.value.trim()) {
+      pushUndo();
+      if (ed.id == null) {
+        setDrawings((prev) => [...prev, { id: newId(), type: "text", l: ed.l, p: ed.p, text: ed.value.trim() }]);
+      } else {
+        setDrawings((prev) => prev.map((d) => (d.id === ed.id && d.type === "text" ? { ...d, text: ed.value.trim() } : d)));
+      }
+    }
+    setTextEditor(null);
+    requestRedraw();
+  };
+  const cancelTextEditor = () => {
+    setTextEditor(null);
+    requestRedraw();
+  };
+
+  // ---- 右键菜单：设置 / 克隆 / 锁定 / 删除 ----
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const ctxDrawing = ctxMenu ? drawings.find((d) => d.id === ctxMenu.id) : null;
+  const cloneDrawing = (id: string) => {
+    const d = drawingsRef.current.find((x) => x.id === id);
+    if (!d) return;
+    // 各类型独立构造（偏移 5 根 K 线），避免联合类型收窄问题
+    const copy: Drawing =
+      d.type === "text"
+        ? { ...d, id: newId(), l: d.l + 5 }
+        : d.type === "hline"
+        ? { ...d, id: newId() } // 水平线克隆保持原价（同名线用颜色区分）
+        : d.type === "fib"
+        ? { ...d, id: newId(), a: { ...d.a, l: d.a.l + 5 }, b: { ...d.b, l: d.b.l + 5 } }
+        : d.type === "pos"
+        ? { ...d, id: newId(), a: { ...d.a, l: d.a.l + 5 }, b: { ...d.b, l: d.b.l + 5 } }
+        : { ...d, id: newId(), a: { ...d.a, l: d.a.l + 5 }, b: { ...d.b, l: d.b.l + 5 } };
+    pushUndo();
+    setDrawings((prev) => [...prev, copy]);
+    requestRedraw();
+  };
+  const toggleLockDrawing = (id: string) => {
+    pushUndo();
+    setDrawings((prev) => prev.map((d) => (d.id === id ? { ...d, locked: !d.locked } : d)));
+    if (selectedRef.current === id) setSelectedId(null);
+    requestRedraw();
+  };
+  const deleteDrawingById = (id: string) => {
+    pushUndo();
+    setDrawings((prev) => prev.filter((d) => d.id !== id));
+    if (selectedRef.current === id) setSelectedId(null);
+    requestRedraw();
+  };
+  const onCanvasContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (toolRef.current !== "none") return;
+    const res = pointFromEvent(e);
+    const hit = res ? hitTestEx(res.pos) : null;
+    if (!hit) return; // 空白处右键交给浏览器/图表默认菜单
+    e.preventDefault();
+    e.stopPropagation();
+    const r = canvasRef.current?.getBoundingClientRect();
+    setCtxMenu({ x: e.clientX - (r?.left ?? 0), y: e.clientY - (r?.top ?? 0), id: hit.id });
+  };
+  // 右键菜单关闭：点击菜单外 / Esc（锁定线仍可右键操作，锁只挡拖拽与删除工具）
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCtxMenu(null);
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [ctxMenu]);
+
   const onCanvasDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (toolRef.current !== "none") return;
     const res = pointFromEvent(e);
     if (!res?.pt) return;
     const hit = hitTestEx(res.pos);
     if (!hit) return;
+    const d = drawingsRef.current.find((x) => x.id === hit.id);
+    if (d?.type === "text") {
+      // 双击文字进入编辑（沿用在设置面板的弹层风格）
+      if (d.locked) return;
+      setTextEditor({ id: d.id, l: d.l, p: d.p, value: d.text });
+      return;
+    }
     openSettings(hit.id);
   };
 
@@ -1550,6 +1719,8 @@ export default function CandleChart({
     if (t === "erase") {
       const id = hitTestEx(res.pos)?.id ?? null;
       if (id) {
+        const target = drawingsRef.current.find((d) => d.id === id);
+        if (target?.locked) return; // 锁定的画线不被删除工具擦除（先解锁）
         pushUndo();
         setDrawings((prev) => prev.filter((d) => d.id !== id));
         setEraseHoverId(null);
@@ -1561,6 +1732,11 @@ export default function CandleChart({
     if (t === "hline") {
       pushUndo();
       setDrawings((prev) => [...prev, { id: newId(), type: "hline", price: pt.p }]);
+      if (!stayRef.current) setTool("none");
+      return;
+    }
+    if (t === "text") {
+      setTextEditor({ id: null, l: pt.l, p: pt.p, value: "" });
       if (!stayRef.current) setTool("none");
       return;
     }
@@ -1605,6 +1781,7 @@ export default function CandleChart({
         onMouseLeave={onCanvasMouseLeave}
         onClick={onCanvasClick}
         onDoubleClick={onCanvasDoubleClick}
+        onContextMenu={onCanvasContextMenu}
       />
 
       {ov.ohlcLegend && legend && (
@@ -1707,6 +1884,14 @@ export default function CandleChart({
           </button>
         ))}
         <div className="floatbar-sep" />
+        <button
+          className={`draw-btn ${hideDrawings ? "active" : ""}`}
+          onClick={() => setHideDrawings((v) => !v)}
+          disabled={drawings.length === 0}
+          title={`裸图模式：一键隐藏全部画线（快捷键 H）· 当前 ${drawings.length} 条`}
+        >
+          👁
+        </button>
         <button className="draw-btn" onClick={undo} disabled={histLen.undo === 0} title={`撤销（Ctrl+Z）· ${histLen.undo} 步`}>
           ↩
         </button>
@@ -1720,7 +1905,7 @@ export default function CandleChart({
       {tool !== "none" && (
         <div className="draw-hint">
           {TOOL_HINTS[tool]}
-          {tool !== "erase" && (
+          {tool !== "erase" && tool !== "text" && (
             <>
               {" · "}
               {magnet ? "🧲磁吸开（按住Ctrl临时关）" : "🧲磁吸关"}
@@ -1732,7 +1917,64 @@ export default function CandleChart({
         </div>
       )}
       {tool === "none" && !settingsId && drawings.length > 0 && (
-        <div className="draw-hint">快捷键 1-7 切换工具；单击画线选中（按 Del 删除，Esc 取消）；双击打开设置：精确价位 / 斐波那契水平 / 盈亏比目标 / 颜色</div>
+        <div className="draw-hint">快捷键 1-8 切换工具；单击选中（Del 删除），双击设置；右键画线：设置 / 克隆 / 锁定 / 删除；H 裸图对比</div>
+      )}
+
+      {textEditor && (
+        <div className="chart-box text-editor-layer">
+          <input
+            className="text-editor"
+            autoFocus
+            value={textEditor.value}
+            placeholder="输入标注文字（回车确认，Esc 取消，空=取消）"
+            style={{ left: xOf5m(textEditor.l) ?? 0, top: yOfPrice(textEditor.p) ?? 0 }}
+            onChange={(e) => setTextEditor((p) => (p ? { ...p, value: e.target.value } : p))}
+            onBlur={commitTextEditor}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commitTextEditor();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                cancelTextEditor();
+              }
+            }}
+          />
+        </div>
+      )}
+
+      {ctxMenu && ctxDrawing && (
+        <div
+          className="ctx-menu"
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {ctxDrawing.type !== "text" && (
+            <button onClick={() => { openSettings(ctxMenu.id); setCtxMenu(null); }}>⚙ 设置…</button>
+          )}
+          {ctxDrawing.type === "text" && (
+            <button
+              disabled={ctxDrawing.locked}
+              onClick={() => {
+                setTextEditor({ id: ctxDrawing.id, l: ctxDrawing.l, p: ctxDrawing.p, value: ctxDrawing.text });
+                setCtxMenu(null);
+              }}
+            >
+              ✎ 编辑文字…
+            </button>
+          )}
+          <button onClick={() => { cloneDrawing(ctxMenu.id); setCtxMenu(null); }}>⧉ 克隆</button>
+          <button onClick={() => { toggleLockDrawing(ctxMenu.id); setCtxMenu(null); }}>
+            {ctxDrawing.locked ? "🔓 解锁" : "🔒 锁定"}
+          </button>
+          <button
+            className="danger"
+            onClick={() => { deleteDrawingById(ctxMenu.id); setCtxMenu(null); }}
+          >
+            🗑 删除
+          </button>
+        </div>
       )}
 
       {settingsId &&
@@ -1774,6 +2016,15 @@ export default function CandleChart({
                       onClick={() => patch((p) => ({ ...p, color: c }))}
                     />
                   ))}
+                </div>
+                <div className="ds-row">
+                  <span className="ds-label">锁定</span>
+                  <input
+                    type="checkbox"
+                    checked={!!settingsDraft.locked}
+                    onChange={(e) => patch((p) => ({ ...p, locked: e.target.checked }))}
+                  />
+                  <span className="ds-hint">锁定后不可拖动/擦除，防误碰</span>
                 </div>
 
                 {d.type === "hline" && (

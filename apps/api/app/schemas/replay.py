@@ -148,6 +148,8 @@ class JudgmentIn(BaseModel):
     target: float | None = None
     probability_estimate: Grade = Grade.OKAY
     confidence: Grade = Grade.OKAY
+    # 提交判断时刻的图表画线快照（前端自由结构，仅存档供复盘展示；限制条数防滥用）
+    drawings_snapshot: list[dict] | None = Field(None, max_length=200)
 
     @model_validator(mode="after")
     def _validate_trade_plan(self) -> JudgmentIn:

@@ -8,6 +8,7 @@ import CandleChart, {
   normalizeOverlays,
   type ChartMarker,
   type ChartOverlays,
+  type Drawing,
   type LevelKey,
   type TradeLine,
 } from "../chart/CandleChart";
@@ -476,6 +477,10 @@ export default function ReplayWorkbench() {
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [showMarkers, setShowMarkers] = useState(true);
+  // 画线快照：判断提交时存档；复盘时叠加显示某条判断提交时刻的画线
+  const snapshotGetterRef = useRef<(() => Drawing[]) | null>(null);
+  const exportChartRef = useRef<(() => void) | null>(null);
+  const [snapshotOverlay, setSnapshotOverlay] = useState<Judgment | null>(null);
   const [overlays, setOverlays] = useState<ChartOverlays>(() => {
     try {
       const raw = localStorage.getItem("pall.chartOverlays");
@@ -736,7 +741,9 @@ export default function ReplayWorkbench() {
   const onSubmitJudgment = async (p: JudgmentPayload) => {
     if (!detail) return;
     const prov = curProvider(detail);
-    await submitJudgment(detail.session_id, prov, p);
+    // 画线快照随判断存档（复盘时可见提交当刻的分析标注）
+    const snapshot = snapshotGetterRef.current?.();
+    await submitJudgment(detail.session_id, prov, snapshot ? { ...p, drawings_snapshot: snapshot } : p);
     setJudgmentOpen(false);
     refreshData(detail.session_id, prov, true);
     try {
@@ -1119,6 +1126,13 @@ export default function ReplayWorkbench() {
             <button className="ghost" onClick={() => setNoteOpen(true)}>
               📝 M · 笔记
             </button>
+            <button
+              className="ghost"
+              onClick={() => exportChartRef.current?.()}
+              title="导出图表截图 PNG（含画线/图例/关键价位线），存入错题本或交易日记"
+            >
+              📷 截图
+            </button>
             <div className="toolbar-divider" />
             <span className={`pill ${detail.info.is_completed ? "bad" : "ok"}`}>
               {detail.info.is_completed ? "COMPLETED" : "RECORDING"}
@@ -1244,6 +1258,17 @@ export default function ReplayWorkbench() {
             overlays={overlays}
             tradeLines={tradeLines}
             sessionKey={detail.session_id}
+            snapshotDrawings={
+              snapshotOverlay
+                ? ((snapshotOverlay.payload.drawings_snapshot ?? []) as unknown as Drawing[])
+                : undefined
+            }
+            onRegisterSnapshotGetter={(fn) => {
+              snapshotGetterRef.current = fn;
+            }}
+            onRegisterExport={(fn) => {
+              exportChartRef.current = fn;
+            }}
           />
         </div>
 
@@ -1436,6 +1461,19 @@ export default function ReplayWorkbench() {
                   </div>
                   {j.payload.reasons.length > 0 && (
                     <div className="jitem-reasons">理由：{j.payload.reasons.join("；")}</div>
+                  )}
+                  {j.payload.drawings_snapshot && j.payload.drawings_snapshot.length > 0 && (
+                    <button
+                      className={`small ghost jitem-snap-btn ${snapshotOverlay?.id === j.id ? "active" : ""}`}
+                      onClick={() => setSnapshotOverlay((cur) => (cur?.id === j.id ? null : j))}
+                      title={
+                        snapshotOverlay?.id === j.id
+                          ? "隐藏该判断提交时刻的画线快照"
+                          : "在图上叠加显示该判断提交时刻的画线快照（半透明）"
+                      }
+                    >
+                      {snapshotOverlay?.id === j.id ? "🙈 隐藏画线快照" : `👁 显示画线快照 (${j.payload.drawings_snapshot.length}条)`}
+                    </button>
                   )}
                   <div className="jitem-footer">
                     <span className="hint">已保留原始判断</span>

@@ -149,6 +149,8 @@ type Drawing =
 
 /** 悬停命中部位：a/b = 端点手柄，body = 线条/内部（整体拖动） */
 type HoverPart = "a" | "b" | "body";
+
+export type { DrawPt, FibLevel, Drawing };
 interface HoverHit {
   id: string;
   part: HoverPart;
@@ -299,6 +301,12 @@ interface Props {
   tradeLines?: TradeLine[];
   /** 画线持久化命名空间（一般传 session_id）；缺省则不持久化 */
   sessionKey?: string;
+  /** 复盘叠加：判断提交时刻的画线快照（与当前画线并存展示） */
+  snapshotDrawings?: Drawing[];
+  /** 父层注册回调：随时取当前画线快照（判断提交时随 payload 存档） */
+  onRegisterSnapshotGetter?: (fn: (() => Drawing[]) | null) => void;
+  /** 父层注册回调：导出图表截图 PNG（含画线/图例） */
+  onRegisterExport?: (fn: (() => void) | null) => void;
 }
 
 const TF_STORAGE_KEY = "pall.chartTimeframe";
@@ -315,6 +323,9 @@ export default function CandleChart({
   overlays,
   tradeLines,
   sessionKey,
+  snapshotDrawings,
+  onRegisterSnapshotGetter,
+  onRegisterExport,
 }: Props) {
   const ov = overlays ?? DEFAULT_OVERLAYS;
 
@@ -374,6 +385,8 @@ export default function CandleChart({
   const selectedRef = useRef<string | null>(selectedId);
   const hideRef = useRef(hideDrawings);
   const textEditorRef = useRef(textEditor);
+  const snapshotRef = useRef<Drawing[]>(snapshotDrawings ?? []);
+  snapshotRef.current = snapshotDrawings ?? [];
   const magnetRef = useRef(magnet);
   const stayRef = useRef(stayMode);
   const undoRef = useRef<Drawing[][]>([]);
@@ -1037,6 +1050,13 @@ export default function CandleChart({
         drawOne(d, eraseId === d.id ? "erase" : moveId === d.id ? "move" : selId === d.id ? "sel" : null, false);
       }
     }
+    // 判断提交时刻的画线快照：暗色半透明叠加（复盘对照，不参与交互）
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    for (const d of snapshotRef.current) {
+      drawOne(d, null, true);
+    }
+    ctx.restore();
     if (preview) drawOne(preview, null, true);
   }, [xOf5m, yOfPrice]);
 
@@ -1442,6 +1462,52 @@ export default function CandleChart({
     requestRedraw();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [textEditor]);
+
+  // 快照层变化时重绘
+  useEffect(() => {
+    requestRedraw();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapshotDrawings]);
+
+  // 向父层注册：取当前画线快照（判断提交时存档）
+  useEffect(() => {
+    onRegisterSnapshotGetter?.(() => JSON.parse(JSON.stringify(drawingsRef.current)) as Drawing[]);
+    return () => onRegisterSnapshotGetter?.(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onRegisterSnapshotGetter]);
+
+  // 向父层注册：导出图表 PNG（lightweight-charts takeScreenshot + 画线画布合成）
+  const exportPng = useCallback(() => {
+    const chart = chartRef.current;
+    const overlay = canvasRef.current;
+    const box = boxRef.current;
+    if (!chart || !overlay || !box) return;
+    // 1) 图表本体截图（K线/EMA/价位线/图例都是 DOM/canvas 混合，lightweight-charts 官方 API）
+    const chartShot = chart.takeScreenshot();
+    // 2) 合成到离屏画布：宽高取图表容器实际尺寸
+    const w = Math.round(chartShot.width / (window.devicePixelRatio || 1));
+    const h = Math.round(chartShot.height / (window.devicePixelRatio || 1));
+    const out = document.createElement("canvas");
+    out.width = w;
+    out.height = h;
+    const ctx = out.getContext("2d");
+    if (!ctx) return;
+    ctx.fillStyle = "#10141a";
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(chartShot, 0, 0, w, h);
+    // 3) 叠加画线画布（overlay canvas 与图表同尺寸同位置）
+    ctx.drawImage(overlay, 0, 0, w, h);
+    const url = out.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `chart-${sessionKey ?? "export"}-${new Date().toISOString().slice(0, 10)}.png`;
+    a.click();
+  }, [sessionKey]);
+  useEffect(() => {
+    onRegisterExport?.(exportPng);
+    return () => onRegisterExport?.(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onRegisterExport, exportPng]);
 
   // ---- 画布交互 ----
   // mouseup 常驻监听：快速按下-抬起时 mouseup 可能先于 effect 挂载到达，

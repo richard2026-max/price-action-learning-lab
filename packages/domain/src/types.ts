@@ -41,4 +41,6 @@ export interface JudgmentPayload {
   target: number | null;
   probability_estimate: JudgmentGrade;
   confidence: JudgmentGrade;
+  /** 提交判断那一刻的图表画线快照（结构自由 JSON；复盘时原样叠加） */
+  drawings_snapshot?: unknown[];
 }

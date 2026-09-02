@@ -983,6 +983,17 @@ table.kv td:last-child {
   line-height: 1.4;
 }
 
+/* 判断记录：画线快照显示/隐藏按钮 */
+.jitem-snap-btn {
+  margin-top: 6px;
+  width: 100%;
+}
+.jitem-snap-btn.active {
+  color: var(--accent-blue);
+  border-color: var(--accent-blue);
+  background: rgba(77, 163, 255, 0.12);
+}
+
 .setup-container {
   max-width: 680px;
   margin: 32px auto;

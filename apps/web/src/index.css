@@ -652,6 +652,11 @@ table.kv td:last-child {
   border-color: var(--accent-blue);
   background: rgba(77, 163, 255, 0.14);
 }
+.draw-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
 .draw-btn.danger:hover {
   color: #ef5350;
   border-color: #ef5350;
@@ -668,7 +673,8 @@ table.kv td:last-child {
   border: 1px solid var(--border-default);
   border-radius: 6px;
   pointer-events: none;
-  white-space: nowrap;
+  white-space: normal;
+  max-width: min(420px, calc(100% - 28px));
 }
 
 /* 画线设置面板（双击画线打开） */

@@ -126,7 +126,7 @@ export interface TradeLine {
 // 画线：类型与样式（参考 TradingView）
 // ---------------------------------------------------------------------------
 
-export type DrawTool = "none" | "hline" | "trend" | "ray" | "rect" | "fib" | "pos" | "erase";
+export type DrawTool = "none" | "hline" | "trend" | "ray" | "rect" | "fib" | "pos" | "measure" | "erase";
 
 /** 画线锚点：5m 逻辑索引 + 价格（与显示周期无关，切周期后仍粘在原 K 线） */
 interface DrawPt {
@@ -143,6 +143,7 @@ interface FibLevel {
 type Drawing =
   | { id: string; type: "hline"; price: number; color?: string }
   | { id: string; type: "trend" | "ray" | "rect"; a: DrawPt; b: DrawPt; color?: string }
+  | { id: string; type: "measure"; a: DrawPt; b: DrawPt; color?: string }
   | { id: string; type: "fib"; a: DrawPt; b: DrawPt; color?: string; levels?: FibLevel[] }
   | { id: string; type: "pos"; a: DrawPt; b: DrawPt; color?: string; targets?: number[] };
 
@@ -158,6 +159,7 @@ const DRAW_COLORS: Record<Drawing["type"], string> = {
   trend: "#4da3ff",
   ray: "#4da3ff",
   rect: "#c05fd8",
+  measure: "#e8a33d",
   fib: "#e8a33d",
   pos: "#26a69a",
 };
@@ -182,14 +184,18 @@ const colorOf = (d: Drawing): string => d.color ?? DRAW_COLORS[d.type];
 
 /** 斐波那契回撤位（含 TradingView 常用扩展位，用于止盈/盈亏比推演） */
 const DRAW_TOOLS: Array<{ key: DrawTool; icon: string; title: string }> = [
-  { key: "hline", icon: "─", title: "水平线（点击放置；悬停可上下拖动，双击可精确输入价位/改颜色）" },
-  { key: "trend", icon: "╱", title: "趋势线（两点线段；悬停可整体拖动，拖端点圆圈微调，双击改颜色）" },
-  { key: "ray", icon: "→", title: "射线（起点向右无限延伸；悬停可整体拖动，拖端点圆圈微调，双击改颜色）" },
-  { key: "rect", icon: "□", title: "矩形（框选震荡区间；悬停可整体拖动，拖角上圆圈改大小，双击改颜色）" },
-  { key: "fib", icon: "ƒ", title: "斐波那契回撤（0~1 回撤位 + 扩展位；双击可自定义水平与价位）" },
-  { key: "pos", icon: "±", title: "盈亏比仓位（第 1 点=入场价，第 2 点=止损价；自动识别多空，标出各 R 盈亏比目标位；双击可自定义目标 R）" },
+  { key: "hline", icon: "─", title: "水平线（点击放置；悬停可上下拖动，双击可精确输入价位/改颜色）· 快捷键 1" },
+  { key: "trend", icon: "╱", title: "趋势线（两点线段；悬停可整体拖动，拖端点圆圈微调，双击改颜色）· 快捷键 2" },
+  { key: "ray", icon: "→", title: "射线（起点向右无限延伸；悬停可整体拖动，拖端点圆圈微调，双击改颜色）· 快捷键 3" },
+  { key: "rect", icon: "□", title: "矩形（框选震荡区间；悬停可整体拖动，拖角上圆圈改大小，双击改颜色）· 快捷键 4" },
+  { key: "fib", icon: "ƒ", title: "斐波那契回撤（0~1 回撤位 + 扩展位；双击可自定义水平与价位）· 快捷键 5" },
+  { key: "pos", icon: "±", title: "盈亏比仓位（第 1 点=入场价，第 2 点=止损价；自动识别多空，标出各 R 盈亏比目标位；双击可自定义目标 R）· 快捷键 6" },
+  { key: "measure", icon: "📐", title: "测量（第 1 点定起点，第 2 点定终点：价差 / 涨跌幅 / K 线根数 / 时长）· 快捷键 7" },
   { key: "erase", icon: "⌫", title: "删除画线（点击要删除的画线）" },
 ];
+
+/** 数字键 1-7 直达工具（顺序与工具栏一致；再按同键取消回 none） */
+const HOTKEY_TOOLS: DrawTool[] = ["hline", "trend", "ray", "rect", "fib", "pos", "measure"];
 
 const TOOL_HINTS: Record<DrawTool, string> = {
   none: "",
@@ -199,6 +205,7 @@ const TOOL_HINTS: Record<DrawTool, string> = {
   rect: "矩形：点第 1 个对角，再点对角完成 · Esc 取消",
   fib: "斐波那契：点第 1 下（如波段低点），再点终点（如高点），0 位于终点 · Esc 取消",
   pos: "盈亏比仓位：点第 1 下定入场价，再点 1 下定止损价（止损低于入场=做多，反之做空）· Esc 取消",
+  measure: "测量：点第 1 下定起点，再点 1 下定终点，显示价差 / 涨跌幅 / K 线根数 / 时长 · Esc 取消",
   erase: "删除画线：点击要删除的线条",
 };
 
@@ -333,6 +340,11 @@ export default function CandleChart({
   const [eraseHoverId, setEraseHoverId] = useState<string | null>(null);
   const [drag, setDrag] = useState<HoverHit | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // 磁吸（锚点吸附 K 线 OHLC）与连续画图（画完不退出工具）：未设置过时默认开
+  const [magnet, setMagnet] = useState<boolean>(() => localStorage.getItem("pa_magnet") !== "0");
+  const [stayMode, setStayMode] = useState<boolean>(() => localStorage.getItem("pa_stay") !== "0");
+  // 撤销/重做：drawings 快照栈（栈本体在 ref；长度进 state 驱动按钮态）
+  const [histLen, setHistLen] = useState({ undo: 0, redo: 0 });
   // 画线设置面板（双击打开；草稿确认后生效）
   const [settingsId, setSettingsId] = useState<string | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<SettingsDraft | null>(null);
@@ -350,8 +362,14 @@ export default function CandleChart({
   const hoverRef = useRef<HoverHit | null>(hover);
   const eraseHoverRef = useRef<string | null>(eraseHoverId);
   const selectedRef = useRef<string | null>(selectedId);
+  const magnetRef = useRef(magnet);
+  const stayRef = useRef(stayMode);
+  const undoRef = useRef<Drawing[][]>([]);
+  const redoRef = useRef<Drawing[][]>([]);
+  const preDragRef = useRef<Drawing[] | null>(null);
+  const dragMovedRef = useRef(false);
   const dragRef = useRef<{ id: string; part: HoverPart; startPt: DrawPt; orig: Drawing } | null>(null);
-  const draftRef = useRef<{ type: "trend" | "ray" | "rect" | "fib" | "pos"; a: DrawPt } | null>(null);
+  const draftRef = useRef<{ type: "trend" | "ray" | "rect" | "fib" | "pos" | "measure"; a: DrawPt } | null>(null);
   const mousePxRef = useRef<{ x: number; y: number } | null>(null);
   const mouseDrawRef = useRef<DrawPt | null>(null);
   const hoveredIdxRef = useRef<number | null>(null);
@@ -369,6 +387,8 @@ export default function CandleChart({
   hoverRef.current = hover;
   eraseHoverRef.current = eraseHoverId;
   selectedRef.current = selectedId;
+  magnetRef.current = magnet;
+  stayRef.current = stayMode;
 
   // ---- 坐标换算：5m 逻辑索引 ↔ 像素（大周期视图下按聚合几何插值） ----
   const xOf5m = useCallback((l5: number): number | null => {
@@ -458,6 +478,66 @@ export default function CandleChart({
     chart.setCrosshairPosition(price, bar.time as Time, series);
   }, []);
 
+  // 磁吸：锚点吸附到光标下 K 线的开/高/低/收（12px 内取最近），按住 Ctrl 临时关闭
+  const snapPt = useCallback((pos: { x: number; y: number }, pt: DrawPt, ctrl: boolean): DrawPt => {
+    if (!magnetRef.current || ctrl) return pt;
+    const chart = chartRef.current;
+    const series = candleRef.current;
+    if (!chart || !series) return pt;
+    const lg = numOrNull(chart.timeScale().coordinateToLogical(pos.x as Coordinate));
+    const bars = aggRef.current.bars;
+    if (lg == null || bars.length === 0) return pt;
+    const gi = Math.max(0, Math.min(bars.length - 1, Math.round(lg)));
+    const b = bars[gi];
+    let best: number | null = null;
+    let bestD = Number.POSITIVE_INFINITY;
+    for (const p of [b.open, b.high, b.low, b.close]) {
+      const y = numOrNull(series.priceToCoordinate(p));
+      if (y == null) continue;
+      const d = Math.abs(y - pos.y);
+      if (d < bestD) {
+        bestD = d;
+        best = p;
+      }
+    }
+    if (best == null || bestD > 12) return pt;
+    let l = gi;
+    const geom = aggRef.current.geom;
+    if (tfRef.current !== "5m" && geom.groups.length > 0 && geom.groups[gi]) {
+      const gr = geom.groups[gi];
+      l = gr.start + (gr.count - 1) / 2;
+    }
+    return { l, p: best };
+  }, []);
+
+  // ---- 撤销/重做（drawings 快照栈；拖拽在手势结束时入栈） ----
+  const syncHist = () => setHistLen({ undo: undoRef.current.length, redo: redoRef.current.length });
+  const pushUndo = () => {
+    undoRef.current.push(drawingsRef.current);
+    if (undoRef.current.length > 100) undoRef.current.shift();
+    redoRef.current = [];
+    syncHist();
+  };
+  const undo = () => {
+    const prev = undoRef.current.pop();
+    if (!prev) return;
+    redoRef.current.push(drawingsRef.current);
+    setDrawings(prev);
+    setEraseHoverId(null);
+    setSelectedId(null);
+    syncHist();
+    requestRedraw();
+  };
+  const redo = () => {
+    const next = redoRef.current.pop();
+    if (!next) return;
+    undoRef.current.push(drawingsRef.current);
+    setDrawings(next);
+    setSelectedId(null);
+    syncHist();
+    requestRedraw();
+  };
+
   const yOfPrice = useCallback((p: number): number | null => {
     return numOrNull(candleRef.current?.priceToCoordinate(p));
   }, []);
@@ -485,6 +565,12 @@ export default function CandleChart({
         } else if (d.type === "ray") {
           if (distToRay(pos.x, pos.y, ax, ay, bx, by) <= 7) return { id: d.id, part: "body" };
         } else if (d.type === "rect") {
+          const x0 = Math.min(ax, bx);
+          const x1 = Math.max(ax, bx);
+          const y0 = Math.min(ay, by);
+          const y1 = Math.max(ay, by);
+          if (pos.x >= x0 && pos.x <= x1 && pos.y >= y0 && pos.y <= y1) return { id: d.id, part: "body" };
+        } else if (d.type === "measure") {
           const x0 = Math.min(ax, bx);
           const x1 = Math.max(ax, bx);
           const y0 = Math.min(ay, by);
@@ -797,6 +883,66 @@ export default function CandleChart({
         if (!isDraft) {
           drawAnchor(pts.ax, pts.ay, color);
           drawAnchor(pts.bx, pts.by, color);
+        }
+      } else if (d.type === "measure") {
+        const pts = twoPts(d);
+        if (!pts) {
+          ctx.restore();
+          return;
+        }
+        const up = d.b.p >= d.a.p;
+        const mColor = up ? "#26a69a" : "#ef5350";
+        const x0 = Math.min(pts.ax, pts.bx);
+        const x1 = Math.max(pts.ax, pts.bx);
+        const y0 = Math.min(pts.ay, pts.by);
+        const y1 = Math.max(pts.ay, pts.by);
+        ctx.fillStyle = hexToRgba(mColor, 0.1);
+        ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+        if (glow) {
+          ctx.save();
+          ctx.strokeStyle = glow === "erase" ? "rgba(255,82,82,0.4)" : "rgba(130,180,255,0.45)";
+          ctx.lineWidth = 6.2;
+          ctx.beginPath();
+          ctx.rect(x0, y0, x1 - x0, y1 - y0);
+          ctx.stroke();
+          ctx.restore();
+        }
+        ctx.setLineDash(isDraft ? [5, 4] : [4, 3]);
+        ctx.strokeStyle = mColor;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.rect(x0, y0, x1 - x0, y1 - y0);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // 信息标签：价差 / 涨跌幅 / 5m 根数 / 时长
+        const dp = d.b.p - d.a.p;
+        const pct = d.a.p !== 0 ? (dp / d.a.p) * 100 : 0;
+        const nBars = Math.max(0, Math.round(Math.abs(d.b.l - d.a.l)));
+        const mins = nBars * 5;
+        const durTxt = mins >= 60 ? `${Math.floor(mins / 60)}小时${mins % 60 ? `${mins % 60}分` : ""}` : `${mins}分`;
+        const l1 = `${dp >= 0 ? "+" : ""}${dp.toFixed(2)}（${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%）`;
+        const l2 = `${nBars} 根 · ${durTxt}`;
+        ctx.font = "600 10px system-ui, sans-serif";
+        const tw = Math.max(ctx.measureText(l1).width, ctx.measureText(l2).width) + 14;
+        const cx = (x0 + x1) / 2;
+        const cy = (y0 + y1) / 2;
+        const bx = Math.max(2, Math.min(w - tw - 2, cx - tw / 2));
+        const by = Math.max(2, Math.min(h - 34, cy - 15));
+        ctx.fillStyle = "#10141a";
+        roundRectPath(ctx, bx, by, tw, 30, 4);
+        ctx.fill();
+        ctx.strokeStyle = hexToRgba(mColor, 0.8);
+        ctx.lineWidth = 1;
+        roundRectPath(ctx, bx, by, tw, 30, 4);
+        ctx.stroke();
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = mColor;
+        ctx.fillText(l1, bx + 7, by + 9.5);
+        ctx.fillStyle = "#e6edf3";
+        ctx.fillText(l2, bx + 7, by + 21);
+        if (!isDraft) {
+          drawAnchor(pts.ax, pts.ay, mColor);
+          drawAnchor(pts.bx, pts.by, mColor);
         }
       } else {
         // trend | ray
@@ -1130,6 +1276,7 @@ export default function CandleChart({
   const clearDrawings = () => {
     if (drawings.length === 0) return;
     if (window.confirm(`确定清空当前会话的全部 ${drawings.length} 条画线吗？`)) {
+      pushUndo();
       setDrawings([]);
       setEraseHoverId(null);
       setHover(null);
@@ -1156,6 +1303,7 @@ export default function CandleChart({
       if ((e.key === "Delete" || e.key === "Backspace") && selectedId && !settingsId && !typing) {
         e.preventDefault();
         const id = selectedId;
+        pushUndo();
         setSelectedId(null);
         setDrawings((prev) => prev.filter((d) => d.id !== id));
         requestRedraw();
@@ -1164,6 +1312,56 @@ export default function CandleChart({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [tool, settingsId, selectedId]);
+
+  // 磁吸/连续画图偏好持久化
+  useEffect(() => {
+    localStorage.setItem("pa_magnet", magnet ? "1" : "0");
+  }, [magnet]);
+  useEffect(() => {
+    localStorage.setItem("pa_stay", stayMode ? "1" : "0");
+  }, [stayMode]);
+
+  // 工具快捷键：1-7 切换工具（同键再按取消）、G 磁吸、Ctrl+Z/Ctrl+Y 撤销重做；输入框内不劫持
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const typing =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target != null && target.isContentEditable);
+      if (typing || settingsId) return;
+      if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+        const k = e.key.toLowerCase();
+        if (k === "z") {
+          e.preventDefault();
+          if (e.shiftKey) redo();
+          else undo();
+        } else if (k === "y") {
+          e.preventDefault();
+          redo();
+        }
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === "g" || e.key === "G") {
+        setMagnet((m) => !m);
+        return;
+      }
+      if (e.key === "s" || e.key === "S") {
+        setStayMode((s) => !s);
+        return;
+      }
+      const n = Number(e.key);
+      if (Number.isInteger(n) && n >= 1 && n <= HOTKEY_TOOLS.length) {
+        const t = HOTKEY_TOOLS[n - 1];
+        setTool(toolRef.current === t ? "none" : t);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsId]);
 
   // 选中状态变化时重绘（选中画线显示持续高亮）
   useEffect(() => {
@@ -1177,6 +1375,15 @@ export default function CandleChart({
   useEffect(() => {
     const end = () => {
       if (!dragRef.current) return;
+      // 拖拽手势实际移动过才记一步撤销
+      if (dragMovedRef.current && preDragRef.current) {
+        undoRef.current.push(preDragRef.current);
+        if (undoRef.current.length > 100) undoRef.current.shift();
+        redoRef.current = [];
+        setHistLen({ undo: undoRef.current.length, redo: 0 });
+      }
+      preDragRef.current = null;
+      dragMovedRef.current = false;
       dragRef.current = null;
       setDrag(null);
     };
@@ -1198,6 +1405,7 @@ export default function CandleChart({
   const applyDrag = (pt: DrawPt) => {
     const dg = dragRef.current;
     if (!dg) return;
+    dragMovedRef.current = true;
     const dL = pt.l - dg.startPt.l;
     const dP = pt.p - dg.startPt.p;
     setDrawings((prev) =>
@@ -1243,6 +1451,7 @@ export default function CandleChart({
       closeSettings();
       return;
     }
+    pushUndo();
     setDrawings((prev) =>
       prev.map((d): Drawing => {
         if (d.id !== settingsId) return d;
@@ -1291,8 +1500,12 @@ export default function CandleChart({
     const orig = drawingsRef.current.find((d) => d.id === hit.id);
     if (!orig) return;
     e.preventDefault();
+    // 端点拖拽走磁吸；整体拖动不吸附（否则整个图形会跳变）
+    const startPt = hit.part === "a" || hit.part === "b" ? snapPt(res.pos, res.pt, e.ctrlKey || e.metaKey) : res.pt;
     if (selectedRef.current !== hit.id) setSelectedId(hit.id);
-    dragRef.current = { id: hit.id, part: hit.part, startPt: res.pt, orig: JSON.parse(JSON.stringify(orig)) as Drawing };
+    preDragRef.current = drawingsRef.current;
+    dragMovedRef.current = false;
+    dragRef.current = { id: hit.id, part: hit.part, startPt, orig: JSON.parse(JSON.stringify(orig)) as Drawing };
     setDrag(hit);
   };
 
@@ -1331,12 +1544,13 @@ export default function CandleChart({
     // 不依赖前置 mousemove：直接用点击坐标换算锚点（触摸/合成点击也可靠）
     const res = pointFromEvent(e);
     if (!res || !res.pt) return;
-    const pt = res.pt;
+    const pt = snapPt(res.pos, res.pt, e.ctrlKey || e.metaKey);
     mousePxRef.current = res.pos;
     mouseDrawRef.current = pt;
     if (t === "erase") {
       const id = hitTestEx(res.pos)?.id ?? null;
       if (id) {
+        pushUndo();
         setDrawings((prev) => prev.filter((d) => d.id !== id));
         setEraseHoverId(null);
         setSelectedId((prev) => (prev === id ? null : prev));
@@ -1345,8 +1559,9 @@ export default function CandleChart({
       return;
     }
     if (t === "hline") {
+      pushUndo();
       setDrawings((prev) => [...prev, { id: newId(), type: "hline", price: pt.p }]);
-      setTool("none");
+      if (!stayRef.current) setTool("none");
       return;
     }
     const draft = draftRef.current;
@@ -1355,9 +1570,11 @@ export default function CandleChart({
       requestRedraw();
       return;
     }
+    pushUndo();
     setDrawings((prev) => [...prev, { id: newId(), type: draft.type, a: draft.a, b: pt }]);
     draftRef.current = null;
-    setTool("none");
+    if (!stayRef.current) setTool("none");
+    requestRedraw();
   };
 
   const tfLabel = TIMEFRAMES.find((t) => t.key === tf)?.label ?? tf;
@@ -1464,6 +1681,21 @@ export default function CandleChart({
           ))}
         </div>
         <div className="floatbar-sep" />
+        <button
+          className={`draw-btn ${magnet ? "active" : ""}`}
+          onClick={() => setMagnet((m) => !m)}
+          title="磁吸模式：锚点自动吸附 K 线开/高/低/收（按住 Ctrl 临时关闭）· 快捷键 G"
+        >
+          🧲
+        </button>
+        <button
+          className={`draw-btn ${stayMode ? "active" : ""}`}
+          onClick={() => setStayMode((s) => !s)}
+          title="连续画图：画完一条后保持工具激活，可连续绘制多条（快捷键 S）"
+        >
+          ✏️
+        </button>
+        <div className="floatbar-sep" />
         {DRAW_TOOLS.map((t) => (
           <button
             key={t.key}
@@ -1475,13 +1707,32 @@ export default function CandleChart({
           </button>
         ))}
         <div className="floatbar-sep" />
+        <button className="draw-btn" onClick={undo} disabled={histLen.undo === 0} title={`撤销（Ctrl+Z）· ${histLen.undo} 步`}>
+          ↩
+        </button>
+        <button className="draw-btn" onClick={redo} disabled={histLen.redo === 0} title={`重做（Ctrl+Y）· ${histLen.redo} 步`}>
+          ↪
+        </button>
         <button className="draw-btn danger" onClick={clearDrawings} title="清空当前会话全部画线">
           🗑️
         </button>
       </div>
-      {tool !== "none" && <div className="draw-hint">{TOOL_HINTS[tool]}</div>}
+      {tool !== "none" && (
+        <div className="draw-hint">
+          {TOOL_HINTS[tool]}
+          {tool !== "erase" && (
+            <>
+              {" · "}
+              {magnet ? "🧲磁吸开（按住Ctrl临时关）" : "🧲磁吸关"}
+              {" · "}
+              {stayMode ? "✏️连续开（画完不退出，S键关）" : "✏️连续关（画完退出，S键开）"}
+              {" · G/S 切换"}
+            </>
+          )}
+        </div>
+      )}
       {tool === "none" && !settingsId && drawings.length > 0 && (
-        <div className="draw-hint">单击画线选中（按 Del 删除，Esc 取消）；双击打开设置：精确价位 / 斐波那契水平 / 盈亏比目标 / 颜色</div>
+        <div className="draw-hint">快捷键 1-7 切换工具；单击画线选中（按 Del 删除，Esc 取消）；双击打开设置：精确价位 / 斐波那契水平 / 盈亏比目标 / 颜色</div>
       )}
 
       {settingsId &&

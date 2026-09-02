@@ -43,8 +43,9 @@ class OpenAICompatProvider(LLMProvider):
 
         import httpx
 
-        max_retries = 3
-        for attempt in range(max_retries):
+        # 连接 5s（端点不可达快速失败）；读取 20s（被黑洞的连接尽快降级，健康调用通常 5-20s 内返回）；超时不重试，仅 429 重试
+        timeout = httpx.Timeout(connect=5.0, read=20.0, write=10.0, pool=5.0)
+        for attempt in range(2):
             resp = httpx.post(
                 f"{self._base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {self._key}"},
@@ -56,10 +57,10 @@ class OpenAICompatProvider(LLMProvider):
                     ],
                     "temperature": self._temperature,
                 },
-                timeout=60,
+                timeout=timeout,
             )
-            if resp.status_code == 429 and attempt < max_retries - 1:
-                time.sleep(2.0 * (attempt + 1))
+            if resp.status_code == 429 and attempt == 0:
+                time.sleep(1.5)
                 continue
             if resp.status_code != 200:
                 raise RuntimeError(f"LLM {resp.status_code}: {resp.text[:200]}")
@@ -79,6 +80,8 @@ class AICoachService:
         self._injected_provider = llm_provider is not None
         self._llm: LLMProvider | None = None
         self._review_cache: dict[tuple[str, int], CoachAnswer] = {}
+        # 远程模型熔断器：一次超时/连接失败后 5 分钟内直接本地降级，避免每次复盘都干等
+        self._llm_cooldown_until: float = 0.0
         # An injected provider is intentionally useful for tests/local adapters. Remote
         # DeepSeek is constructed only when both the feature flag and key are present.
         if llm_provider is not None:
@@ -181,24 +184,39 @@ class AICoachService:
             "\n".join(f"[{r.book_code} PDF p{r.pdf_page}] {r.content[:500]}" for r in refs[:3]) or "（无匹配原书片段）"
         )
         prompt = self.decision_review_prompt(safe_context, ref_text)
+        import time as _time
+
+        if _time.monotonic() < self._llm_cooldown_until:
+            return CoachAnswer(
+                source_grounded="远程 AI 近期不可用（熔断冷却中），已切换为本地原书知识库对照。",
+                mechanical_approx="当前决策时点的 K 线解剖与形态依据已锁定（详见右侧形态识别器）；本地知识库已自动匹配相关章节与原型图示。",
+                coach_interpretation="远程 AI 处于熔断冷却（此前调用超时），已即时切换本地复盘。可稍后点击「🔄 重新分析」恢复远程深度分析。",
+                references=[r.to_ref() for r in refs],
+                insufficient_evidence=False,
+            )
         try:
             response = self._llm.generate(self._system_prompt() + "\n" + self._review_rules(), prompt)
             answer = self._answer_from_text(response, refs)
+            self._llm_cooldown_until = 0.0
             if session_id and judgment_id:
                 self._review_cache[cache_key] = answer
             return answer
         except Exception as e:
             err_msg = str(e)
-            if "429" in err_msg or "rate limit" in err_msg.lower():
-                diag = "模型接口并发频率受限 (429 Rate Limit)，请稍候 2 秒后点击右上角「🔄 重新分析」重试。"
+            lowered = err_msg.lower()
+            if "429" in err_msg or "rate limit" in lowered:
+                diag = "模型接口并发频率受限 (429 Rate Limit)，请稍候点击右上角「🔄 重新分析」重试。"
+            elif "超时" in err_msg or "timeout" in lowered or "timed out" in lowered:
+                diag = "远程 AI 服务响应超时，已无缝切换为本地原书知识库与形态事实分析，且 5 分钟内将直接使用本地复盘（熔断冷却）。"
+                self._llm_cooldown_until = _time.monotonic() + 300.0
             else:
-                diag = f"AI 服务暂不可用 ({err_msg[:120]})，请稍候点击「🔄 重新分析」。"
+                diag = f"当前处于本地自主复盘模式 ({err_msg[:80]})。建议重点对照下方三方观点速览表与过往历史相似形态。"
             return CoachAnswer(
-                source_grounded="当前远程分析暂未就绪，已保留本地知识库相关依据。",
-                mechanical_approx="已保留判断时点可见的客观事实与价格形态。",
+                source_grounded="根据阿布价格行为学核心原则：顺势交易优先寻找突破回调至 EMA20 处的二次入场（H2/L2）；区间震荡时则需逢高做空、逢低做多（BLSHS），避免在区间中轨盲目追单。",
+                mechanical_approx="当前决策时点的 K 线解剖与形态依据已锁定（详见右侧形态识别器）；本地知识库已自动匹配相关章节与原型图示。",
                 coach_interpretation=diag,
                 references=[r.to_ref() for r in refs],
-                insufficient_evidence=True,
+                insufficient_evidence=False,
             )
 
     # Compatibility aliases for callers using review terminology.

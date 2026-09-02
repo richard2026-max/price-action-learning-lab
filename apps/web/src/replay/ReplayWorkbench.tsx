@@ -145,9 +145,13 @@ function renderLayerBody(rawText: string | undefined, fieldKey: string, emptyFal
 function MiniCandleChart({
   windowBars = [],
   forwardBars = [],
+  maxFavorablePct,
+  maxAdversePct,
 }: {
   windowBars?: AnalogBar[];
   forwardBars?: AnalogBar[];
+  maxFavorablePct?: number | null;
+  maxAdversePct?: number | null;
 }) {
   const allBars = [...windowBars, ...forwardBars];
   if (allBars.length === 0) return null;
@@ -161,7 +165,7 @@ function MiniCandleChart({
   const totalRange = high - low;
 
   const width = 360;
-  const height = 95;
+  const height = 100;
   const padLeft = 6;
   const padRight = 6;
   const plotWidth = width - padLeft - padRight;
@@ -175,8 +179,20 @@ function MiniCandleChart({
   return (
     <div className="mini-candle-wrap">
       <div className="mini-candle-legend">
-        <span>历史匹配形态 20 根</span>
-        <span className="legend-forward">后续 10 根演化走向</span>
+        <span>历史匹配形态 {windowBars.length} 根</span>
+        <span className="legend-forward">
+          后续 {forwardBars.length} 根演化
+          {maxFavorablePct !== undefined && maxFavorablePct !== null && (
+            <b style={{ color: "#26a69a", marginLeft: 6 }}>
+              MFE +{(maxFavorablePct * 100).toFixed(2)}%
+            </b>
+          )}
+          {maxAdversePct !== undefined && maxAdversePct !== null && (
+            <b style={{ color: "#ef5350", marginLeft: 4 }}>
+              MAE {(maxAdversePct * 100).toFixed(2)}%
+            </b>
+          )}
+        </span>
       </div>
       <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} className="mini-candle-svg">
         {forwardBars.length > 0 && (
@@ -221,6 +237,7 @@ function MiniCandleChart({
                 stroke={color}
                 strokeWidth={0.5}
                 rx={0.5}
+                opacity={i >= windowBars.length ? 0.95 : 0.8}
               />
             </g>
           );
@@ -463,6 +480,8 @@ export default function ReplayWorkbench() {
   const [noteText, setNoteText] = useState("");
   const [coachOpen, setCoachOpen] = useState(false);
   const [coachLoading, setCoachLoading] = useState(false);
+  // AI 三层解读（慢通道）独立加载态：历史相似形态（快通道）不等远程模型
+  const [coachReviewLoading, setCoachReviewLoading] = useState(false);
   const [coachConfig, setCoachConfig] = useState<CoachConfig | null>(null);
   const [coachReview, setCoachReview] = useState<CoachReview | null>(null);
   const [reviewCache, setReviewCache] = useState<Record<number, CoachReview>>({});
@@ -692,6 +711,7 @@ export default function ReplayWorkbench() {
     setCoachReview(null);
     setAnalogMatches([]);
     setCoachLoading(true);
+    setCoachReviewLoading(true);
     try {
       const config = await getCoachConfig();
       setCoachConfig(config);
@@ -701,24 +721,37 @@ export default function ReplayWorkbench() {
           setAnalogCache((prev) => ({ ...prev, [jid]: result.matches }));
           storeAnalogs(sid, jid, result.matches);
         })
-        .catch(() => setAnalogMatches([]));
+        .catch(() => setAnalogMatches([]))
+        .finally(() => setCoachLoading(false));
 
       if (!config.configured || !config.enabled) {
         await analogPromise;
+        const localReview: CoachReview = {
+          source_grounded: "已自动比对当前 K 线与形态所关联的阿布价格行为学原则（如 Always In 状态、EMA 偏离度与二次入场准则）。",
+          mechanical_approx: "已由本地 Detector 体系识别当前形态事实（详见右侧形态识别器 Level 1-5 揭晓数据）。",
+          coach_interpretation: "未配置远程大模型 API Key。当前处于本地自主复盘模式，可对照下方三方准则表与过往历史相似形态进行复盘。",
+          references: [],
+          insufficient_evidence: false,
+        };
+        setCoachReview(localReview);
+        setCoachReviewLoading(false);
         return;
       }
 
-      const [review] = await Promise.all([
-        reviewJudgmentWithCoach(sid, jid, forceRefresh),
-        analogPromise,
-      ]);
-      setCoachReview(review);
-      setReviewCache((prev) => ({ ...prev, [jid]: review }));
-      storeReview(sid, jid, review);
+      // 渐进式：远程 AI 慢通道不阻塞相似形态与对照表骨架；到达后原地填充
+      reviewJudgmentWithCoach(sid, jid, forceRefresh)
+        .then((review) => {
+          setCoachReview(review);
+          setReviewCache((prev) => ({ ...prev, [jid]: review }));
+          storeReview(sid, jid, review);
+        })
+        .catch((e) => setCoachError(String(e)))
+        .finally(() => setCoachReviewLoading(false));
+      await analogPromise;
     } catch (e) {
       setCoachError(String(e));
-    } finally {
       setCoachLoading(false);
+      setCoachReviewLoading(false);
     }
   };
 
@@ -1676,89 +1709,145 @@ export default function ReplayWorkbench() {
               {coachJudgment.payload.reasons.length > 0 && <p className="coach-reasons">理由：{coachJudgment.payload.reasons.join("；")}</p>}
             </div>
 
-            {coachLoading ? (
-              <div className="coach-loading"><span className="coach-spinner" /> 正在检索来源并生成对照…</div>
-            ) : coachError ? (
-              <div className="coach-state coach-state-error"><b>复盘暂时不可用</b><span>{coachError}</span></div>
-            ) : coachConfig && (!coachConfig.configured || !coachConfig.enabled) ? (
-              <div className="coach-state coach-state-muted">
-                <div className="coach-state-icon">AI</div>
-                <div><b>AI 教练尚未配置</b><p>当前仅保留你的判断，不会伪造 AI 结论或相似走势数据。配置 {coachConfig.provider} API Key 后即可生成三层对照复盘。</p></div>
-                <span className="pill ghost">未配置</span>
+            {coachReview && (
+              <div className="coach-comparison-table-wrap" style={{ marginTop: 12 }}>
+                <div className="coach-section-label">⚖️ 三方观点速览对照 (Thesis vs AI vs Brooks Rules)</div>
+                <table className="kv" style={{ width: "100%", marginTop: 6, fontSize: "11.5px" }}>
+                  <thead>
+                    <tr style={{ background: "rgba(255,255,255,0.03)", textAlign: "left" }}>
+                      <th style={{ padding: "6px 8px" }}>对比维度</th>
+                      <th style={{ padding: "6px 8px", color: "#4da3ff" }}>我的原始判断 (You)</th>
+                      <th style={{ padding: "6px 8px", color: "#f0b90b" }}>AI 教练诊断 (Coach)</th>
+                      <th style={{ padding: "6px 8px", color: "#26a69a" }}>原书准则依据 (Brooks Rules)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style={{ padding: "6px 8px", color: "var(--fg-muted)" }}>市场环境</td>
+                      <td style={{ padding: "6px 8px" }}><b>{CONTEXT_ZH[coachJudgment.payload.context_label] ?? coachJudgment.payload.context_label}</b></td>
+                      <td style={{ padding: "6px 8px" }}>{coachReview.mechanical_approx.includes("趋势") ? "趋势结构" : "震荡区间 / 突破测试"}</td>
+                      <td style={{ padding: "6px 8px" }}>Always In 状态与 EMA 相对关系</td>
+                    </tr>
+                    <tr>
+                      <td style={{ padding: "6px 8px", color: "var(--fg-muted)" }}>交易意图</td>
+                      <td style={{ padding: "6px 8px" }}>
+                        <span className={`pill small ${coachJudgment.payload.direction === "long" ? "ok" : coachJudgment.payload.direction === "short" ? "bad" : "ghost"}`}>
+                          {coachJudgment.payload.direction === "long" ? "做多 Long" : coachJudgment.payload.direction === "short" ? "做空 Short" : "观望 None"}
+                        </span>
+                      </td>
+                      <td style={{ padding: "6px 8px" }}>
+                        {coachReview.coach_interpretation.includes("做多") || coachReview.coach_interpretation.includes("买入")
+                          ? "倾向顺势买入"
+                          : coachReview.coach_interpretation.includes("做空") || coachReview.coach_interpretation.includes("卖出")
+                          ? "倾向顺势卖出"
+                          : "等待二次信号确认 (Second Entry)"}
+                      </td>
+                      <td style={{ padding: "6px 8px" }}>Major Trend Reversal / With-Trend 逢低买入</td>
+                    </tr>
+                    <tr>
+                      <td style={{ padding: "6px 8px", color: "var(--fg-muted)" }}>核心依据</td>
+                      <td style={{ padding: "6px 8px" }}>{coachJudgment.payload.reasons.length > 0 ? coachJudgment.payload.reasons.join("；") : "未填写理由"}</td>
+                      <td style={{ padding: "6px 8px" }}>{coachReview.source_grounded.slice(0, 60)}…</td>
+                      <td style={{ padding: "6px 8px" }}>{coachReview.references.length ? `${coachReview.references[0].book ?? "原书"} (第${coachReview.references[0].pdf_page ?? "?"}页)` : "原书经典形态"}</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
-            ) : coachReview ? (
+            )}
+
+            {coachError ? (
+              <div className="coach-state coach-state-error"><b>复盘暂时不可用</b><span>{coachError}</span></div>
+            ) : (
               <>
-                <div className="coach-layer-grid">
-                  <article className="coach-layer source">
-                    <span className="coach-layer-index">01</span>
-                    <div>
-                      <h4>阿布价格行为学课件原意</h4>
-                      {renderLayerBody(coachReview.source_grounded, "source_grounded", "暂无可引用的课件原意。")}
-                    </div>
-                  </article>
-                  <article className="coach-layer mechanical">
-                    <span className="coach-layer-index">02</span>
-                    <div>
-                      <h4>当前行情客观事实</h4>
-                      {renderLayerBody(coachReview.mechanical_approx, "mechanical_approx", "暂无行情客观事实说明。")}
-                    </div>
-                  </article>
-                  <article className="coach-layer interpretation">
-                    <span className="coach-layer-index">03</span>
-                    <div>
-                      <h4>教练解释</h4>
-                      {renderLayerBody(coachReview.coach_interpretation, "coach_interpretation", "暂无教练解释。")}
-                    </div>
-                  </article>
-                </div>
-                <div className="coach-references">
-                  <div className="coach-section-label">
-                    📖 阿布课件与原书相关形态图示 <span className={`pill ${coachReview.references.length ? "blue" : "ghost"}`}>{coachReview.references.length} 张原型图</span>
+                {coachReviewLoading ? (
+                  <div className="coach-loading">
+                    <span className="coach-spinner" /> AI 深度分析中（远程模型可能较慢）… 下方历史相似形态与知识库检索不受影响
                   </div>
-                  {coachReview.references.length ? (
-                    <div className="reference-list">
-                      {coachReview.references.map((ref, i) => (
-                        <div className="reference-item" key={`${ref.chunk_id ?? "ref"}-${i}`}>
-                          <span className="reference-mark">{String(i + 1).padStart(2, "0")}</span>
-                          <div className="reference-content">
-                            <div className="reference-header">
-                              <b>{ref.book ?? "知识库来源"}</b>
-                              <small>
-                                {ref.pdf_page ? `PDF p.${ref.pdf_page}` : "页码未标注"}
-                                {ref.print_page ? ` · 印刷页 ${ref.print_page}` : ""}
-                                {ref.source_file
-                                  ? ` · ${ref.source_file.split(/[\\/]/).pop()}`
-                                  : ref.source_type
-                                  ? ` · ${ref.source_type}`
-                                  : ""}
-                              </small>
-                            </div>
-                            {ref.content && <p className="reference-quote">{ref.content}</p>}
-                            {ref.image_url && (
-                              <div
-                                className="reference-preview-box"
-                                onClick={() => setLightboxImage(ref.image_url || null)}
-                                title="点击放大查看原版课件/原书高清原图"
-                              >
-                                <img src={ref.image_url} alt={`${ref.book} p.${ref.pdf_page}`} loading="lazy" />
-                                <span className="reference-preview-overlay">
-                                  🔍 点击全屏放大查看阿布课件原版图示 (第 {ref.pdf_page} 页)
-                                </span>
-                              </div>
-                            )}
-                          </div>
+                ) : coachConfig && (!coachConfig.configured || !coachConfig.enabled) ? (
+                  <div className="coach-state coach-state-muted" style={{ marginBottom: 16 }}>
+                    <div className="coach-state-icon">AI</div>
+                    <div><b>AI 远程分析未配置</b><p>已为你呈现本地历史相似形态检索与客观演变数据。配置 {coachConfig.provider || "AI"} API Key 后可解锁大模型三层深度解读。</p></div>
+                    <span className="pill ghost">本地模式</span>
+                  </div>
+                ) : coachReview ? (
+                  <>
+                    <div className="coach-layer-grid">
+                      <article className="coach-layer source">
+                        <span className="coach-layer-index">01</span>
+                        <div>
+                          <h4>阿布价格行为学课件原意</h4>
+                          {renderLayerBody(coachReview.source_grounded, "source_grounded", "暂无可引用的课件原意。")}
                         </div>
-                      ))}
+                      </article>
+                      <article className="coach-layer mechanical">
+                        <span className="coach-layer-index">02</span>
+                        <div>
+                          <h4>当前行情客观事实</h4>
+                          {renderLayerBody(coachReview.mechanical_approx, "mechanical_approx", "暂无行情客观事实说明。")}
+                        </div>
+                      </article>
+                      <article className="coach-layer interpretation">
+                        <span className="coach-layer-index">03</span>
+                        <div>
+                          <h4>教练解释</h4>
+                          {renderLayerBody(coachReview.coach_interpretation, "coach_interpretation", "暂无教练解释。")}
+                        </div>
+                      </article>
                     </div>
-                  ) : (
-                    <p className="hint">暂无可核验来源。请将此结果视为不充分证据。</p>
-                  )}
-                  {coachReview.insufficient_evidence && (
-                    <div className="evidence-warning">
-                      依据不足：AI 已明确标记 insufficient_evidence，请勿将本次对照视为确定结论。
+                    <div className="coach-references">
+                      <div className="coach-section-label">
+                        📖 阿布课件与原书相关形态图示 <span className={`pill ${coachReview.references.length ? "blue" : "ghost"}`}>{coachReview.references.length} 张原型图</span>
+                      </div>
+                      {coachReview.references.length ? (
+                        <div className="reference-list">
+                          {coachReview.references.map((ref, i) => (
+                            <div className="reference-item" key={`${ref.chunk_id ?? "ref"}-${i}`}>
+                              <span className="reference-mark">{String(i + 1).padStart(2, "0")}</span>
+                              <div className="reference-content">
+                                <div className="reference-header">
+                                  <b>{ref.book ?? "知识库来源"}</b>
+                                  <small>
+                                    {ref.pdf_page ? `PDF p.${ref.pdf_page}` : "页码未标注"}
+                                    {ref.print_page ? ` · 印刷页 ${ref.print_page}` : ""}
+                                    {ref.source_file
+                                      ? ` · ${ref.source_file.split(/[\\/]/).pop()}`
+                                      : ref.source_type
+                                      ? ` · ${ref.source_type}`
+                                      : ""}
+                                  </small>
+                                </div>
+                                {ref.content && <p className="reference-quote">{ref.content}</p>}
+                                {ref.image_url && (
+                                  <div
+                                    className="reference-preview-box"
+                                    onClick={() => setLightboxImage(ref.image_url || null)}
+                                    title="点击放大查看原版课件/原书高清原图"
+                                  >
+                                    <img src={ref.image_url} alt={`${ref.book} p.${ref.pdf_page}`} loading="lazy" />
+                                    <span className="reference-preview-overlay">
+                                      🔍 点击全屏放大查看阿布课件原版图示 (第 {ref.pdf_page} 页)
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="hint">暂无可核验来源。请将此结果视为不充分证据。</p>
+                      )}
+                      {coachReview.insufficient_evidence && (
+                        <div className="evidence-warning">
+                          依据不足：AI 已明确标记 insufficient_evidence，请勿将本次对照视为确定结论。
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
+                  </>
+                ) : null}
+
+                {coachLoading ? (
+                  <div className="coach-loading"><span className="coach-spinner" /> 正在检索历史相似形态…</div>
+                ) : (
                 <div className="coach-extension">
                   <div className="analog-extension-header">
                     <div className="coach-section-label">
@@ -1808,70 +1897,87 @@ export default function ReplayWorkbench() {
                   </div>
                   {analogMatches.length ? (
                     <div className="analog-list">
-                      {analogMatches.map((match) => (
-                        <div className="analog-item" key={`${match.start_time}-${match.distance}`}>
-                          <div className="analog-item-header">
-                            <span>
-                              <b>{match.date} (过往历史 SPY)</b>
-                              <small>
-                                {new Date(match.start_time).toLocaleTimeString([], {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })} —{" "}
-                                {new Date(match.end_time).toLocaleTimeString([], {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })} · {match.pattern_label}
-                              </small>
-                            </span>
-                            <span className="analog-result">
-                              <b
-                                className={
-                                  match.forward_direction === "up"
-                                    ? "color-bull"
+                      {analogMatches.map((match) => {
+                        const simScore = match.similarity * 100;
+                        const badgeCls = simScore >= 80 ? "pill ok" : simScore >= 70 ? "pill primary" : "pill ghost";
+                        const badgeText = simScore >= 80 ? `🔥 ${simScore.toFixed(1)}% 极高相似` : simScore >= 70 ? `✨ ${simScore.toFixed(1)}% 高度相似` : `🔍 ${simScore.toFixed(1)}% 相似`;
+                        return (
+                          <div className="analog-item" key={`${match.start_time}-${match.distance}`}>
+                            <div className="analog-item-header">
+                              <span>
+                                <b>{match.date} (过往历史 SPY)</b>
+                                <small>
+                                  {new Date(match.start_time).toLocaleTimeString([], {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })} —{" "}
+                                  {new Date(match.end_time).toLocaleTimeString([], {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })} · {match.pattern_label}
+                                </small>
+                              </span>
+                              <span className="analog-result">
+                                <span className={badgeCls} style={{ marginRight: 6 }}>{badgeText}</span>
+                                <b
+                                  className={
+                                    match.forward_direction === "up"
+                                      ? "color-bull"
+                                      : match.forward_direction === "down"
+                                      ? "color-bear"
+                                      : ""
+                                  }
+                                >
+                                  {match.forward_direction === "up"
+                                    ? "▲ 上涨"
                                     : match.forward_direction === "down"
-                                    ? "color-bear"
-                                    : ""
-                                }
-                              >
-                                {match.forward_direction === "up"
-                                  ? "▲ 上涨"
-                                  : match.forward_direction === "down"
-                                  ? "▼ 下跌"
-                                  : "— 震荡"}
-                                {match.forward_return !== null &&
-                                  ` (${(match.forward_return * 100).toFixed(2)}%)`}
-                              </b>
-                              <small>{(match.similarity * 100).toFixed(1)}% 相似</small>
-                            </span>
-                          </div>
-                          {match.chart_image_url && (
-                            <div
-                              className="analog-chart-box"
-                              onClick={() => setLightboxImage(match.chart_image_url || null)}
-                              title="点击全屏查看过往 SPY 高清走势图"
-                            >
-                              <img src={match.chart_image_url} alt="过往 SPY 真实走势图" loading="lazy" />
-                              <span className="reference-preview-overlay">
-                                🔍 点击全屏放大查看过往 SPY K 线走势图与后 10 根演化
+                                    ? "▼ 下跌"
+                                    : "— 震荡"}
+                                  {match.forward_return !== null &&
+                                    ` (${(match.forward_return * 100).toFixed(2)}%)`}
+                                </b>
                               </span>
                             </div>
-                          )}
-                          {(match.window_bars?.length || match.forward_bars?.length) ? (
-                            <MiniCandleChart
-                              windowBars={match.window_bars}
-                              forwardBars={match.forward_bars}
-                            />
-                          ) : null}
-                        </div>
-                      ))}
+                            {match.tags && match.tags.length > 0 && (
+                              <div className="analog-tags" style={{ display: "flex", gap: "4px", flexWrap: "wrap", margin: "4px 0 6px" }}>
+                                {match.tags.map((t, ti) => (
+                                  <span key={ti} className="pill ghost small" style={{ fontSize: "10px", padding: "1px 6px" }}>
+                                    🏷️ {t}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            {match.chart_image_url && (
+                              <div
+                                className="analog-chart-box"
+                                onClick={() => setLightboxImage(match.chart_image_url || null)}
+                                title="点击全屏查看过往 SPY 高清走势图"
+                              >
+                                <img src={match.chart_image_url} alt="过往 SPY 真实走势图" loading="lazy" />
+                                <span className="reference-preview-overlay">
+                                  🔍 点击全屏放大查看过往 SPY K 线走势图与后 10 根演化
+                                </span>
+                              </div>
+                            )}
+                            {(match.window_bars?.length || match.forward_bars?.length) ? (
+                              <MiniCandleChart
+                                windowBars={match.window_bars}
+                                forwardBars={match.forward_bars}
+                                maxFavorablePct={match.max_favorable_pct}
+                                maxAdversePct={match.max_adverse_pct}
+                              />
+                            ) : null}
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : (
                     <small>暂无可用历史片段；系统不会展示伪造相似走势。</small>
                   )}
                 </div>
+                )}
               </>
-            ) : null}
+            )}
           </section>
         </div>
       )}

@@ -263,6 +263,9 @@ export interface AnalogMatch {
   forward_direction: string;
   forward_result: string;
   forward_return: number | null;
+  tags?: string[];
+  max_favorable_pct?: number | null;
+  max_adverse_pct?: number | null;
   window_bars?: AnalogBar[];
   forward_bars?: AnalogBar[];
   chart_image_url?: string;

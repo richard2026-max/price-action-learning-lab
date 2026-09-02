@@ -31,6 +31,9 @@ class AnalogMatch:
     forward_direction: str
     forward_result: str
     forward_return: float | None
+    tags: list[str] = field(default_factory=list)
+    max_favorable_pct: float | None = None
+    max_adverse_pct: float | None = None
     window_bars: list[dict[str, Any]] = field(default_factory=list)
     forward_bars: list[dict[str, Any]] = field(default_factory=list)
     chart_image_url: str | None = None
@@ -155,6 +158,11 @@ class AnalogSearchService:
             future_close = future[-1].close if future else end_close
             change = (future_close - end_close) / end_close if end_close else None
             direction = self._direction(change)
+
+            # 计算后续演变中的最大有利位移与最大不利位移
+            max_fav, max_adv = self._compute_mfe_mae(end_close, future)
+            tags = self._extract_tags(window, future)
+
             matches.append(
                 AnalogMatch(
                     date=w_start.date(),
@@ -166,6 +174,9 @@ class AnalogSearchService:
                     forward_direction=direction,
                     forward_result=self._forward_result(direction, change),
                     forward_return=round(change, 6) if change is not None else None,
+                    tags=tags,
+                    max_favorable_pct=round(max_fav, 4) if max_fav is not None else None,
+                    max_adverse_pct=round(max_adv, 4) if max_adv is not None else None,
                     window_bars=[
                         {
                             "open": round(b.open, 2),
@@ -205,6 +216,9 @@ class AnalogSearchService:
                     forward_direction=m.forward_direction,
                     forward_result=m.forward_result,
                     forward_return=m.forward_return,
+                    tags=m.tags,
+                    max_favorable_pct=m.max_favorable_pct,
+                    max_adverse_pct=m.max_adverse_pct,
                     window_bars=m.window_bars,
                     forward_bars=m.forward_bars,
                     chart_image_url=chart_url,
@@ -276,6 +290,59 @@ class AnalogSearchService:
         if change is None:
             return "insufficient_data"
         return direction
+
+    @staticmethod
+    def _compute_mfe_mae(end_close: float, future: Sequence[Bar]) -> tuple[float | None, float | None]:
+        if not future or end_close <= 0:
+            return None, None
+        highest = max(b.high for b in future)
+        lowest = min(b.low for b in future)
+        fav = (highest - end_close) / end_close
+        adv = (lowest - end_close) / end_close
+        return fav, adv
+
+    @staticmethod
+    def _extract_tags(window: Sequence[Bar], future: Sequence[Bar]) -> list[str]:
+        tags: list[str] = []
+        if not window:
+            return tags
+        # 1. 结构趋势标签
+        net = window[-1].close - window[0].close
+        span = max(b.high for b in window) - min(b.low for b in window)
+        ratio = abs(net) / span if span else 0.0
+        if ratio >= 0.65:
+            tags.append("强势单边牛" if net > 0 else "强势单边熊")
+        elif ratio <= 0.35:
+            tags.append("窄幅横盘震荡")
+        else:
+            tags.append("通道推进")
+
+        # 2. 局部 K 线特征
+        last = window[-1]
+        rng = last.high - last.low
+        if rng > 0:
+            body = abs(last.close - last.open)
+            if body / rng >= 0.7:
+                tags.append("大实体收盘" + ("▲" if last.close > last.open else "▼"))
+            elif body / rng <= 0.15:
+                tags.append("十字星测试")
+            if (last.high - max(last.open, last.close)) / rng >= 0.5:
+                tags.append("长上影拒绝")
+            elif (min(last.open, last.close) - last.low) / rng >= 0.5:
+                tags.append("长下影支撑")
+
+        # 3. 后续演变标签
+        if future:
+            f_net = future[-1].close - window[-1].close
+            f_span = max(b.high for b in future) - min(b.low for b in future)
+            if f_net > 0 and (future[-1].close >= max(b.high for b in window)):
+                tags.append("后续向上突破")
+            elif f_net < 0 and (future[-1].close <= min(b.low for b in window)):
+                tags.append("后续向下破位")
+            elif f_span <= rng * 1.5:
+                tags.append("后续横盘停顿")
+
+        return tags[:4]
 
     @staticmethod
     def _pattern_label(bars: Sequence[Bar]) -> str:

@@ -527,11 +527,11 @@ table.kv td:last-child {
   cursor: crosshair;
 }
 
-/* OKX 风格顶部图例：悬停 K 线的 开/高/低/收/涨跌幅 + EMA */
+/* OKX 风格顶部图例：悬停 K 线的 开/高/低/收/涨跌幅 + EMA（让开左侧工具栏） */
 .chart-legend {
   position: absolute;
   top: 48px;
-  left: 14px;
+  left: 64px;
   z-index: 30;
   pointer-events: none;
   display: flex;
@@ -586,25 +586,26 @@ table.kv td:last-child {
   opacity: 0.9;
 }
 
-/* 图表右上角浮动工具条：周期切换 + 画线工具 */
-.chart-floatbar {
+/* 图例与周期切换位置：见 .chart-legend / .tf-switch */
+.chart-toolbar .draw-btn {
+  width: 30px;
+  height: 26px;
+}
+.draw-btn {
+/* 左上角周期切换条（显示控制，与画线工具分离） */
+.tf-switch {
   position: absolute;
   top: 12px;
-  right: 14px;
+  left: 14px;
   z-index: 40;
   display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 4px 6px;
+  gap: 2px;
+  padding: 3px 4px;
   background: rgba(16, 20, 26, 0.92);
   border: 1px solid var(--border-default);
   border-radius: 8px;
   backdrop-filter: blur(4px);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
-}
-.tf-switch {
-  display: flex;
-  gap: 2px;
 }
 .tf-btn {
   padding: 3px 8px;
@@ -624,11 +625,58 @@ table.kv td:last-child {
   background: rgba(77, 163, 255, 0.18);
   border-color: var(--accent-blue);
 }
-.floatbar-sep {
-  width: 1px;
-  height: 16px;
-  background: var(--border-default);
-  margin: 0 3px;
+
+/* 左侧竖排工具栏（TradingView 式分组；data-label hover 时显示分组名） */
+.chart-toolbar {
+  position: absolute;
+  top: 50px;
+  left: 14px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px 4px;
+  background: rgba(16, 20, 26, 0.92);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+.ct-group {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* 分组间分隔线（第一组之前不画） */
+.ct-group + .ct-group {
+  padding-top: 4px;
+  border-top: 1px solid var(--border-subtle, #21262d);
+}
+/* 分组小标题：hover 分组内按钮时浮现 */
+.ct-group::after {
+  content: attr(data-label);
+  position: absolute;
+  left: calc(100% + 10px);
+  top: -3px;
+  z-index: 41;
+  padding: 2px 7px;
+  font-size: 10px;
+  color: var(--fg-secondary);
+  white-space: nowrap;
+  background: rgba(16, 20, 26, 0.96);
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.ct-group:hover::after {
+  opacity: 1;
+}
+.chart-toolbar .draw-btn {
+  width: 30px;
+  height: 26px;
 }
 .draw-btn {
   width: 28px;

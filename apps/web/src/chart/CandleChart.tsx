@@ -1901,72 +1901,81 @@ export default function CandleChart({
         </div>
       )}
 
-      <div className="chart-floatbar">
-        <div className="tf-switch">
-          {TIMEFRAMES.map((t) => (
+      {/* 周期切换：左上角独立小条（显示控制，与画线工具分离） */}
+      <div className="tf-switch">
+        {TIMEFRAMES.map((t) => (
+          <button
+            key={t.key}
+            className={`tf-btn ${tf === t.key ? "active" : ""}`}
+            onClick={() => changeTf(t.key)}
+            title={
+              ({
+                "5m": "5 分钟（回放主周期）",
+                "15m": "15 分钟（Brooks 常用高周期）",
+                "60m": "60 分钟（找支撑阻力 / 相似形态）",
+                "4h": "4 小时（大周期支撑阻力，09:30 开盘对齐）",
+                "1d": "日线（大级别支撑阻力）",
+                "1w": "周线（最大级别趋势与形态）",
+              } as Record<string, string>)[t.key] ?? t.label
+            }
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* 左侧竖排工具栏（TradingView 式分组；新增工具 = 新增一组或往组里加按钮） */}
+      <div className="chart-toolbar">
+        <div className="ct-group" data-label="模式">
+          <button
+            className={`draw-btn ${magnet ? "active" : ""}`}
+            onClick={() => setMagnet((m) => !m)}
+            title="磁吸模式：锚点自动吸附 K 线开/高/低/收（按住 Ctrl 临时关闭）· 快捷键 G"
+          >
+            🧲
+          </button>
+          <button
+            className={`draw-btn ${stayMode ? "active" : ""}`}
+            onClick={() => setStayMode((s) => !s)}
+            title="连续画图：画完一条后保持工具激活，可连续绘制多条（快捷键 S）"
+          >
+            ✏️
+          </button>
+          <button
+            className={`draw-btn ${hideDrawings ? "active" : ""}`}
+            onClick={() => setHideDrawings((v) => !v)}
+            disabled={drawings.length === 0}
+            title={`裸图模式：一键隐藏全部画线（快捷键 H）· 当前 ${drawings.length} 条`}
+          >
+            👁
+          </button>
+        </div>
+        <div className="ct-group" data-label="画线">
+          {DRAW_TOOLS.filter((t) => t.key !== "erase").map((t) => (
             <button
               key={t.key}
-              className={`tf-btn ${tf === t.key ? "active" : ""}`}
-              onClick={() => changeTf(t.key)}
-              title={
-                ({
-                  "5m": "5 分钟（回放主周期）",
-                  "15m": "15 分钟（Brooks 常用高周期）",
-                  "60m": "60 分钟（找支撑阻力 / 相似形态）",
-                  "4h": "4 小时（大周期支撑阻力，09:30 开盘对齐）",
-                  "1d": "日线（大级别支撑阻力）",
-                  "1w": "周线（最大级别趋势与形态）",
-                } as Record<string, string>)[t.key] ?? t.label
-              }
+              className={`draw-btn ${tool === t.key ? "active" : ""}`}
+              onClick={() => setTool(tool === t.key ? "none" : t.key)}
+              title={t.title}
             >
-              {t.label}
+              {t.icon}
             </button>
           ))}
         </div>
-        <div className="floatbar-sep" />
-        <button
-          className={`draw-btn ${magnet ? "active" : ""}`}
-          onClick={() => setMagnet((m) => !m)}
-          title="磁吸模式：锚点自动吸附 K 线开/高/低/收（按住 Ctrl 临时关闭）· 快捷键 G"
-        >
-          🧲
-        </button>
-        <button
-          className={`draw-btn ${stayMode ? "active" : ""}`}
-          onClick={() => setStayMode((s) => !s)}
-          title="连续画图：画完一条后保持工具激活，可连续绘制多条（快捷键 S）"
-        >
-          ✏️
-        </button>
-        <div className="floatbar-sep" />
-        {DRAW_TOOLS.map((t) => (
-          <button
-            key={t.key}
-            className={`draw-btn ${tool === t.key ? "active" : ""}`}
-            onClick={() => setTool(tool === t.key ? "none" : t.key)}
-            title={t.title}
-          >
-            {t.icon}
+        <div className="ct-group" data-label="编辑">
+          <button className="draw-btn" onClick={undo} disabled={histLen.undo === 0} title={`撤销（Ctrl+Z）· ${histLen.undo} 步`}>
+            ↩
           </button>
-        ))}
-        <div className="floatbar-sep" />
-        <button
-          className={`draw-btn ${hideDrawings ? "active" : ""}`}
-          onClick={() => setHideDrawings((v) => !v)}
-          disabled={drawings.length === 0}
-          title={`裸图模式：一键隐藏全部画线（快捷键 H）· 当前 ${drawings.length} 条`}
-        >
-          👁
-        </button>
-        <button className="draw-btn" onClick={undo} disabled={histLen.undo === 0} title={`撤销（Ctrl+Z）· ${histLen.undo} 步`}>
-          ↩
-        </button>
-        <button className="draw-btn" onClick={redo} disabled={histLen.redo === 0} title={`重做（Ctrl+Y）· ${histLen.redo} 步`}>
-          ↪
-        </button>
-        <button className="draw-btn danger" onClick={clearDrawings} title="清空当前会话全部画线">
-          🗑️
-        </button>
+          <button className="draw-btn" onClick={redo} disabled={histLen.redo === 0} title={`重做（Ctrl+Y）· ${histLen.redo} 步`}>
+            ↪
+          </button>
+          <button className={`draw-btn ${tool === "erase" ? "active" : ""}`} onClick={() => setTool(tool === "erase" ? "none" : "erase")} title="删除画线工具：点击要删除的线条">
+            ⌫
+          </button>
+          <button className="draw-btn danger" onClick={clearDrawings} title="清空当前会话全部画线">
+            🗑️
+          </button>
+        </div>
       </div>
       {tool !== "none" && (
         <div className="draw-hint">

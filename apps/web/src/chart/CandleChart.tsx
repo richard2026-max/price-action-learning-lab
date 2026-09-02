@@ -219,20 +219,34 @@ const colorOf = (d: Drawing): string => d.color ?? DRAW_COLORS[d.type];
 const measureCtx = document.createElement("canvas").getContext("2d");
 
 /** 斐波那契回撤位（含 TradingView 常用扩展位，用于止盈/盈亏比推演） */
-const DRAW_TOOLS: Array<{ key: DrawTool; icon: string; title: string }> = [
-  { key: "hline", icon: "─", title: "水平线（点击放置；悬停可上下拖动，双击可精确输入价位/改颜色）· 快捷键 1" },
-  { key: "trend", icon: "╱", title: "趋势线（两点线段；悬停可整体拖动，拖端点圆圈微调，双击改颜色）· 快捷键 2" },
-  { key: "ray", icon: "→", title: "射线（起点向右无限延伸；悬停可整体拖动，拖端点圆圈微调，双击改颜色）· 快捷键 3" },
-  { key: "rect", icon: "□", title: "矩形（框选震荡区间；悬停可整体拖动，拖角上圆圈改大小，双击改颜色）· 快捷键 4" },
-  { key: "fib", icon: "ƒ", title: "斐波那契回撤（0~1 回撤位 + 扩展位；双击可自定义水平与价位）· 快捷键 5" },
-  { key: "pos", icon: "±", title: "盈亏比仓位（第 1 点=入场价，第 2 点=止损价；自动识别多空，标出各 R 盈亏比目标位；双击可自定义目标 R）· 快捷键 6" },
-  { key: "measure", icon: "📐", title: "测量（第 1 点定起点，第 2 点定终点：价差 / 涨跌幅 / K 线根数 / 时长）· 快捷键 7" },
-  { key: "text", icon: "🅣", title: "文字标注（点击放置，输入文字；常用于标记 H1/H2、楔形、想法）· 快捷键 8" },
-  { key: "erase", icon: "⌫", title: "删除画线（点击要删除的画线）" },
+const DRAW_TOOLS: Array<{ key: DrawTool; icon: string; name: string; title: string }> = [
+  { key: "hline", icon: "─", name: "水平线", title: "水平线（点击放置；悬停可上下拖动，双击可精确输入价位/改颜色）· 快捷键 1" },
+  { key: "trend", icon: "╱", name: "趋势线", title: "趋势线（两点线段；悬停可整体拖动，拖端点圆圈微调，双击改颜色）· 快捷键 2" },
+  { key: "ray", icon: "→", name: "射线", title: "射线（起点向右无限延伸；悬停可整体拖动，拖端点圆圈微调，双击改颜色）· 快捷键 3" },
+  { key: "rect", icon: "□", name: "矩形", title: "矩形（框选震荡区间；悬停可整体拖动，拖角上圆圈改大小，双击改颜色）· 快捷键 4" },
+  { key: "fib", icon: "ƒ", name: "斐波那契", title: "斐波那契回撤（0~1 回撤位 + 扩展位；双击可自定义水平与价位）· 快捷键 5" },
+  { key: "pos", icon: "±", name: "盈亏比仓位", title: "盈亏比仓位（第 1 点=入场价，第 2 点=止损价；自动识别多空，标出各 R 盈亏比目标位；双击可自定义目标 R）· 快捷键 6" },
+  { key: "measure", icon: "📐", name: "测量", title: "测量（第 1 点定起点，第 2 点定终点：价差 / 涨跌幅 / K 线根数 / 时长）· 快捷键 7" },
+  { key: "text", icon: "🅣", name: "文字标注", title: "文字标注（点击放置，输入文字；常用于标记 H1/H2、楔形、想法）· 快捷键 8" },
+  { key: "erase", icon: "⌫", name: "删除画线", title: "删除画线（点击要删除的画线）" },
 ];
 
 /** 数字键 1-8 直达工具（顺序与工具栏一致；再按同键取消回 none） */
 const HOTKEY_TOOLS: DrawTool[] = ["hline", "trend", "ray", "rect", "fib", "pos", "measure", "text"];
+
+/** 左侧工具栏的抽屉式分组（TradingView 风格）：同族工具折叠进一个槽位，点击展开选择；新工具加进对应组即可 */
+const TOOL_GROUPS: Array<{ id: string; label: string; fallbackIcon: string; tools: DrawTool[] }> = [
+  { id: "lines", label: "线条", fallbackIcon: "╱", tools: ["hline", "trend", "ray"] },
+  { id: "shapes", label: "形状与文字", fallbackIcon: "□", tools: ["rect", "text"] },
+  { id: "measure", label: "测算与仓位", fallbackIcon: "📐", tools: ["fib", "pos", "measure"] },
+];
+const TOOL_BY_KEY: Record<string, { icon: string; name: string; title: string }> = Object.fromEntries(
+  DRAW_TOOLS.map((t) => [t.key, { icon: t.icon, name: t.name, title: t.title }]),
+);
+const hotkeyOf = (tk: DrawTool): string | null => {
+  const idx = HOTKEY_TOOLS.indexOf(tk);
+  return idx >= 0 ? String(idx + 1) : null;
+};
 
 const TOOL_HINTS: Record<DrawTool, string> = {
   none: "",
@@ -1696,6 +1710,22 @@ export default function CandleChart({
 
   // ---- 右键菜单：设置 / 克隆 / 锁定 / 删除 ----
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  // 抽屉式工具分组当前展开的组 id（null = 全部收起）
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
+  // 点击工具栏外部或按 Esc 时收起展开的抽屉
+  useEffect(() => {
+    if (!openGroup) return;
+    const close = () => setOpenGroup(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpenGroup(null);
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [openGroup]);
   const ctxDrawing = ctxMenu ? drawings.find((d) => d.id === ctxMenu.id) : null;
   const cloneDrawing = (id: string) => {
     const d = drawingsRef.current.find((x) => x.id === id);
@@ -1996,16 +2026,42 @@ export default function CandleChart({
           </button>
         </div>
         <div className="ct-group" data-label="画线">
-          {DRAW_TOOLS.filter((t) => t.key !== "erase").map((t) => (
-            <button
-              key={t.key}
-              className={`draw-btn ${tool === t.key ? "active" : ""}`}
-              onClick={() => setTool(tool === t.key ? "none" : t.key)}
-              title={t.title}
-            >
-              {t.icon}
-            </button>
-          ))}
+          {TOOL_GROUPS.map((g) => {
+            const activeTool = g.tools.includes(tool) ? tool : null;
+            const meta = activeTool ? TOOL_BY_KEY[activeTool] : null;
+            return (
+              <div className="ct-slot" key={g.id}>
+                <button
+                  className={`draw-btn ${activeTool ? "active" : ""}`}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={() => setOpenGroup(openGroup === g.id ? null : g.id)}
+                  title={meta ? `${g.label} · 当前：${meta.name}` : `${g.label}（点击展开同族工具）`}
+                >
+                  {meta ? meta.icon : g.fallbackIcon}
+                  <span className="flyout-caret" />
+                </button>
+                {openGroup === g.id && (
+                  <div className="ct-flyout" onMouseDown={(e) => e.stopPropagation()}>
+                    {g.tools.map((tk) => (
+                      <button
+                        key={tk}
+                        className={`ct-flyout-item ${tool === tk ? "active" : ""}`}
+                        title={TOOL_BY_KEY[tk].title}
+                        onClick={() => {
+                          setTool(tool === tk ? "none" : tk);
+                          setOpenGroup(null);
+                        }}
+                      >
+                        <span className="ct-flyout-icon">{TOOL_BY_KEY[tk].icon}</span>
+                        <span className="ct-flyout-name">{TOOL_BY_KEY[tk].name}</span>
+                        {hotkeyOf(tk) && <span className="ct-flyout-key">{hotkeyOf(tk)}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
         <div className="ct-group" data-label="编辑">
           <button className="draw-btn" onClick={undo} disabled={histLen.undo === 0} title={`撤销（Ctrl+Z）· ${histLen.undo} 步`}>

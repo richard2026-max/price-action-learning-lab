@@ -527,10 +527,10 @@ table.kv td:last-child {
   cursor: crosshair;
 }
 
-/* OKX 风格顶部图例：悬停 K 线的 开/高/低/收/涨跌幅 + EMA（让开左侧工具栏） */
+/* OKX 风格顶部图例：悬停 K 线的 开/高/低/收/涨跌幅 + EMA（让开左侧工具栏与周期条） */
 .chart-legend {
   position: absolute;
-  top: 48px;
+  top: 52px;
   left: 64px;
   z-index: 30;
   pointer-events: none;
@@ -586,17 +586,11 @@ table.kv td:last-child {
   opacity: 0.9;
 }
 
-/* 图例与周期切换位置：见 .chart-legend / .tf-switch */
-.chart-toolbar .draw-btn {
-  width: 30px;
-  height: 26px;
-}
-.draw-btn {
-/* 左上角周期切换条（显示控制，与画线工具分离） */
+/* 左上角周期切换条（让开同在左上角的「指标图层」按钮） */
 .tf-switch {
   position: absolute;
-  top: 12px;
-  left: 14px;
+  top: 14px;
+  left: 120px;
   z-index: 40;
   display: flex;
   gap: 2px;
@@ -629,9 +623,9 @@ table.kv td:last-child {
 /* 左侧竖排工具栏（TradingView 式分组；data-label hover 时显示分组名） */
 .chart-toolbar {
   position: absolute;
-  top: 50px;
+  top: 56px;
   left: 14px;
-  z-index: 40;
+  z-index: 42;
   display: flex;
   flex-direction: column;
   gap: 4px;

@@ -44,10 +44,23 @@ export interface ChartMarker {
     | "ioi"
     | "swing_high"
     | "swing_low"
+    | "h1"
+    | "h2"
+    | "h3"
+    | "h4"
+    | "l1"
+    | "l2"
+    | "l3"
+    | "l4"
     | "hl"
     | "wedge"
     | "climax"
-    | "micro_channel";
+    | "micro_channel"
+    | "bull_trend"
+    | "bear_trend"
+    | "bull_signal"
+    | "bear_signal";
+  text?: string;
 }
 
 export type LevelKey =
@@ -70,6 +83,12 @@ export interface ChartOverlays {
   levelItems: Partial<Record<LevelKey, boolean>>; // 每条关键价位线单独开关
   positions: boolean; // 模拟持仓线（入场/止损/目标）
   ohlcLegend: boolean; // 顶部 OHLC 实时图例
+  // ---- 阶段三：价格行为形态与结构识别图层 ----
+  patterns: boolean; // 基础形态（inside, outside, ii, iii, ioi）
+  swings: boolean; // 波段高低点（Swing High / Swing Low）
+  hlCounts: boolean; // Brooks 回调计数与二次入场（H1/H2/L1/L2）
+  complexPatterns: boolean; // 复合形态（楔形 Wedge / 高潮 Climax / 微通道 Micro Channel）
+  signalBars: boolean; // 强趋势 K 线与关键信号 K 线
 }
 
 export const DEFAULT_OVERLAYS: ChartOverlays = {
@@ -82,6 +101,11 @@ export const DEFAULT_OVERLAYS: ChartOverlays = {
   levelItems: {},
   positions: true,
   ohlcLegend: true,
+  patterns: true,
+  swings: true,
+  hlCounts: true,
+  complexPatterns: true,
+  signalBars: true,
 };
 
 /** 兼容旧版本 localStorage 结构：缺省字段回填默认值。 */
@@ -99,6 +123,11 @@ export function normalizeOverlays(raw: unknown): ChartOverlays {
     levelItems,
     positions: o.positions ?? true,
     ohlcLegend: o.ohlcLegend ?? true,
+    patterns: o.patterns ?? true,
+    swings: o.swings ?? true,
+    hlCounts: o.hlCounts ?? true,
+    complexPatterns: o.complexPatterns ?? true,
+    signalBars: o.signalBars ?? true,
   };
 }
 
@@ -1243,25 +1272,41 @@ export default function CandleChart({
     const series = candleRef.current;
     if (!series) return;
     const style: Record<ChartMarker["kind"], Pick<SeriesMarker<Time>, "position" | "shape" | "color" | "text">> = {
-      inside: { position: "belowBar", shape: "circle", color: "#5a6b7d", text: "" },
-      outside: { position: "aboveBar", shape: "circle", color: "#c98a4b", text: "" },
+      inside: { position: "belowBar", shape: "circle", color: "#5a6b7d", text: "i" },
+      outside: { position: "aboveBar", shape: "circle", color: "#c98a4b", text: "o" },
       ii: { position: "aboveBar", shape: "square", color: "#e8c66a", text: "ii" },
       iii: { position: "aboveBar", shape: "square", color: "#e8c66a", text: "iii" },
       ioi: { position: "aboveBar", shape: "square", color: "#e8c66a", text: "ioi" },
       swing_high: { position: "aboveBar", shape: "arrowDown", color: "#4da3ff", text: "SH" },
       swing_low: { position: "belowBar", shape: "arrowUp", color: "#4da3ff", text: "SL" },
+      h1: { position: "belowBar", shape: "arrowUp", color: "#26a69a", text: "H1" },
+      h2: { position: "belowBar", shape: "arrowUp", color: "#00e676", text: "H2 ★" },
+      h3: { position: "belowBar", shape: "arrowUp", color: "#26a69a", text: "H3" },
+      h4: { position: "belowBar", shape: "arrowUp", color: "#26a69a", text: "H4" },
+      l1: { position: "aboveBar", shape: "arrowDown", color: "#ef5350", text: "L1" },
+      l2: { position: "aboveBar", shape: "arrowDown", color: "#ff1744", text: "L2 ★" },
+      l3: { position: "aboveBar", shape: "arrowDown", color: "#ef5350", text: "L3" },
+      l4: { position: "aboveBar", shape: "arrowDown", color: "#ef5350", text: "L4" },
       hl: { position: "belowBar", shape: "square", color: "#7ee2a8", text: "" },
       wedge: { position: "aboveBar", shape: "square", color: "#9c27b0", text: "Wedge" },
       climax: { position: "aboveBar", shape: "arrowDown", color: "#ef5350", text: "Climax" },
       micro_channel: { position: "belowBar", shape: "circle", color: "#26a69a", text: "MC" },
+      bull_trend: { position: "belowBar", shape: "circle", color: "#26a69a", text: "▲" },
+      bear_trend: { position: "aboveBar", shape: "circle", color: "#ef5350", text: "▼" },
+      bull_signal: { position: "belowBar", shape: "arrowUp", color: "#00e676", text: "Buy Sig" },
+      bear_signal: { position: "aboveBar", shape: "arrowDown", color: "#ff1744", text: "Sell Sig" },
     };
     // 大周期视图下把 5m 标记吸附到所属聚合 K 线
     series.setMarkers(
       (markers ?? [])
-        .map((m) => ({
-          time: agg.snapTime(Math.round(Date.parse(m.time) / 1000)) as Time,
-          ...style[m.kind],
-        }))
+        .map((m) => {
+          const s = style[m.kind];
+          return {
+            time: agg.snapTime(Math.round(Date.parse(m.time) / 1000)) as Time,
+            ...s,
+            ...(m.text ? { text: m.text } : {}),
+          };
+        })
         .sort((a, b) => (a.time as number) - (b.time as number)),
     );
   }, [markers, agg]);

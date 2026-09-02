@@ -949,7 +949,10 @@ export default function ReplayWorkbench() {
       if (c.detector_id === "bar_pattern") m[String(c.result)] = (m[String(c.result)] ?? 0) + 1;
       if (c.detector_id === "inside_bar" && c.result === true) m.inside = (m.inside ?? 0) + 1;
       if (c.detector_id === "outside_bar" && c.result === true) m.outside = (m.outside ?? 0) + 1;
-      if (c.detector_id === "hl_counting") m[String(c.result)] = (m[String(c.result)] ?? 0) + 1;
+      if (c.detector_id === "hl_counting") {
+        const k = String(c.result).toUpperCase();
+        m[k] = (m[k] ?? 0) + 1;
+      }
       if (c.detector_id === "wedge") m.wedge = (m.wedge ?? 0) + 1;
       if (c.detector_id === "climax") m.climax = (m.climax ?? 0) + 1;
       if (c.detector_id === "micro_channel") m.micro_channel = (m.micro_channel ?? 0) + 1;
@@ -967,33 +970,72 @@ export default function ReplayWorkbench() {
       const actualIdx = ctxCount + c.bar_index;
       const bar = detail.bars[actualIdx];
       if (!bar) return [];
-      if (c.detector_id === "inside_bar" && c.result === true)
-        return [{ time: bar.ts_open_utc, kind: "inside" as const }];
-      if (c.detector_id === "outside_bar" && c.result === true)
-        return [{ time: bar.ts_open_utc, kind: "outside" as const }];
-      if (c.detector_id === "bar_pattern" && ["ii", "iii", "ioi"].includes(String(c.result)))
-        return [{ time: bar.ts_open_utc, kind: String(c.result) as "ii" | "iii" | "ioi" }];
-      if (c.detector_id === "swing" && ["swing_high", "swing_low"].includes(String(c.result))) {
-        const j = (c.evidence as { swing_bar_index?: number }).swing_bar_index;
-        const targetIdx = ctxCount + (j ?? c.bar_index);
-        const sb = detail.bars[targetIdx] ?? bar;
-        return [{ time: sb.ts_open_utc, kind: String(c.result) as "swing_high" | "swing_low" }];
+
+      // 1) 基础形态图层 (patterns)
+      if (overlays.patterns) {
+        if (c.detector_id === "inside_bar" && c.result === true)
+          return [{ time: bar.ts_open_utc, kind: "inside" as const, text: "i" }];
+        if (c.detector_id === "outside_bar" && c.result === true)
+          return [{ time: bar.ts_open_utc, kind: "outside" as const, text: "o" }];
+        if (c.detector_id === "bar_pattern" && ["ii", "iii", "ioi"].includes(String(c.result)))
+          return [{ time: bar.ts_open_utc, kind: String(c.result) as "ii" | "iii" | "ioi", text: String(c.result) }];
       }
-      if (c.detector_id === "hl_counting") {
-        return [{ time: bar.ts_open_utc, kind: "hl" as const }];
+
+      // 2) 波段高低点图层 (swings)
+      if (overlays.swings) {
+        if (c.detector_id === "swing" && ["swing_high", "swing_low"].includes(String(c.result))) {
+          const j = (c.evidence as { swing_bar_index?: number }).swing_bar_index;
+          const targetIdx = ctxCount + (j ?? c.bar_index);
+          const sb = detail.bars[targetIdx] ?? bar;
+          return [{
+            time: sb.ts_open_utc,
+            kind: String(c.result) as "swing_high" | "swing_low",
+            text: c.result === "swing_high" ? "SH" : "SL",
+          }];
+        }
       }
-      if (c.detector_id === "wedge") {
-        return [{ time: bar.ts_open_utc, kind: "wedge" as const }];
+
+      // 3) Brooks 回调计数与二次入场 (hlCounts)
+      if (overlays.hlCounts) {
+        if (c.detector_id === "hl_counting" && typeof c.result === "string") {
+          const res = c.result.toUpperCase();
+          const isSec = c.evidence?.second_entry === true;
+          if (res === "H1") return [{ time: bar.ts_open_utc, kind: "h1" as const, text: "H1" }];
+          if (res === "H2") return [{ time: bar.ts_open_utc, kind: "h2" as const, text: isSec ? "H2 ★" : "H2" }];
+          if (res === "H3") return [{ time: bar.ts_open_utc, kind: "h3" as const, text: "H3" }];
+          if (res === "H4") return [{ time: bar.ts_open_utc, kind: "h4" as const, text: "H4" }];
+          if (res === "L1") return [{ time: bar.ts_open_utc, kind: "l1" as const, text: "L1" }];
+          if (res === "L2") return [{ time: bar.ts_open_utc, kind: "l2" as const, text: isSec ? "L2 ★" : "L2" }];
+          if (res === "L3") return [{ time: bar.ts_open_utc, kind: "l3" as const, text: "L3" }];
+          if (res === "L4") return [{ time: bar.ts_open_utc, kind: "l4" as const, text: "L4" }];
+          return [{ time: bar.ts_open_utc, kind: "hl" as const, text: res }];
+        }
       }
-      if (c.detector_id === "climax") {
-        return [{ time: bar.ts_open_utc, kind: "climax" as const }];
+
+      // 4) 复合形态图层 (complexPatterns)
+      if (overlays.complexPatterns) {
+        if (c.detector_id === "wedge") {
+          return [{ time: bar.ts_open_utc, kind: "wedge" as const, text: "Wedge" }];
+        }
+        if (c.detector_id === "climax") {
+          return [{ time: bar.ts_open_utc, kind: "climax" as const, text: "Climax" }];
+        }
+        if (c.detector_id === "micro_channel") {
+          return [{ time: bar.ts_open_utc, kind: "micro_channel" as const, text: "MC" }];
+        }
       }
-      if (c.detector_id === "micro_channel") {
-        return [{ time: bar.ts_open_utc, kind: "micro_channel" as const }];
+
+      // 5) 强趋势与信号 K 线 (signalBars)
+      if (overlays.signalBars) {
+        if (c.detector_id === "trend_bar" && c.evidence?.strong === true) {
+          if (c.result === "bull_trend_bar") return [{ time: bar.ts_open_utc, kind: "bull_trend" as const, text: "▲" }];
+          if (c.result === "bear_trend_bar") return [{ time: bar.ts_open_utc, kind: "bear_trend" as const, text: "▼" }];
+        }
       }
+
       return [];
     });
-  }, [detail, candidates, unlocked, showMarkers]);
+  }, [detail, candidates, unlocked, showMarkers, overlays]);
 
   if (!detail) {
     return (
@@ -1226,17 +1268,29 @@ export default function ReplayWorkbench() {
                         {row("keyLevelTitles", "价位线文字标题（如 PDH 前日高）")}
                       </div>
                       <div className="overlay-group">
-                        <div className="overlay-group-title">交易与辅助</div>
-                        {row("positions", "模拟持仓线（入场/止损/目标）", "#26a69a")}
+                        <div className="overlay-group-title">价格行为形态与结构（解剖）</div>
                         <label className="overlay-item">
                           <input
                             type="checkbox"
                             checked={showMarkers}
                             onChange={(e) => setShowMarkers(e.target.checked)}
                           />
-                          <span className="overlay-color" style={{ background: "#26a69a" }} />
-                          形态识别标记（SH/SL/MC/Wedge…）
+                          <span className="overlay-color" style={{ background: "#7ee2a8" }} />
+                          <b>形态标记总开关 (Predict First)</b>
                         </label>
+                        {showMarkers && (
+                          <div className="overlay-level-grid" style={{ gridTemplateColumns: "1fr", gap: "3px", marginTop: "4px" }}>
+                            {row("hlCounts", "回调计数与二次入场 (H1/H2/L1/L2)", "#00e676")}
+                            {row("patterns", "基础形态 (孕线 i / 外包 o / ii / iii / ioi)", "#e8c66a")}
+                            {row("swings", "波段高低点 (SH / SL 极值)", "#4da3ff")}
+                            {row("complexPatterns", "复合形态 (楔形 Wedge / 高潮 / 微通道)", "#9c27b0")}
+                            {row("signalBars", "强趋势 K 线 (实体突破 ▲/▼)", "#26a69a")}
+                          </div>
+                        )}
+                      </div>
+                      <div className="overlay-group">
+                        <div className="overlay-group-title">交易与辅助</div>
+                        {row("positions", "模拟持仓线（入场/止损/目标）", "#26a69a")}
                         {row("ohlcLegend", "顶部 OHLC 实时图例")}
                       </div>
                     </>
@@ -1432,6 +1486,10 @@ export default function ReplayWorkbench() {
                 {patternCount.ii ? ` · ii ${patternCount.ii}` : ""}
                 {patternCount.iii ? ` · iii ${patternCount.iii}` : ""}
                 {patternCount.ioi ? ` · ioi ${patternCount.ioi}` : ""}
+                {patternCount.H1 ? ` · H1 ${patternCount.H1}` : ""}
+                {patternCount.H2 ? ` · H2(二次买入) ${patternCount.H2}` : ""}
+                {patternCount.L1 ? ` · L1 ${patternCount.L1}` : ""}
+                {patternCount.L2 ? ` · L2(二次卖出) ${patternCount.L2}` : ""}
                 {patternCount.wedge ? ` · 楔形 ${patternCount.wedge}` : ""}
                 {patternCount.climax ? ` · 高潮 ${patternCount.climax}` : ""}
               </div>

@@ -772,6 +772,9 @@ table.kv td:last-child {
   align-items: center;
   gap: 6px;
 }
+.ds-level-row.pos {
+  grid-template-columns: 1fr 70px 22px;
+}
 .ds-level-row input[type="number"] {
   width: 100%;
 }

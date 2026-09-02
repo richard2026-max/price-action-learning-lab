@@ -332,6 +332,7 @@ export default function CandleChart({
   const [hover, setHover] = useState<HoverHit | null>(null);
   const [eraseHoverId, setEraseHoverId] = useState<string | null>(null);
   const [drag, setDrag] = useState<HoverHit | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   // 画线设置面板（双击打开；草稿确认后生效）
   const [settingsId, setSettingsId] = useState<string | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<SettingsDraft | null>(null);
@@ -348,6 +349,7 @@ export default function CandleChart({
   const toolRef = useRef(tool);
   const hoverRef = useRef<HoverHit | null>(hover);
   const eraseHoverRef = useRef<string | null>(eraseHoverId);
+  const selectedRef = useRef<string | null>(selectedId);
   const dragRef = useRef<{ id: string; part: HoverPart; startPt: DrawPt; orig: Drawing } | null>(null);
   const draftRef = useRef<{ type: "trend" | "ray" | "rect" | "fib" | "pos"; a: DrawPt } | null>(null);
   const mousePxRef = useRef<{ x: number; y: number } | null>(null);
@@ -366,6 +368,7 @@ export default function CandleChart({
   toolRef.current = tool;
   hoverRef.current = hover;
   eraseHoverRef.current = eraseHoverId;
+  selectedRef.current = selectedId;
 
   // ---- 坐标换算：5m 逻辑索引 ↔ 像素（大周期视图下按聚合几何插值） ----
   const xOf5m = useCallback((l5: number): number | null => {
@@ -438,6 +441,21 @@ export default function CandleChart({
 
   const priceFromY = useCallback((y: number): number | null => {
     return numOrNull(candleRef.current?.coordinateToPrice(y as Coordinate));
+  }, []);
+
+  // 画线工具/悬停画线时覆盖画布接管指针，图表收不到鼠标事件；
+  // 把光标位置转发给图表十字线，保持价格/时间轴标签可见（便于精确定价）
+  const forwardCrosshair = useCallback((pos: { x: number; y: number }) => {
+    const chart = chartRef.current;
+    const series = candleRef.current;
+    if (!chart || !series) return;
+    const lg = numOrNull(chart.timeScale().coordinateToLogical(pos.x as Coordinate));
+    const bars = aggRef.current.bars;
+    if (lg == null || bars.length === 0) return;
+    const bar = bars[Math.max(0, Math.min(bars.length - 1, Math.round(lg)))];
+    const price = numOrNull(series.coordinateToPrice(pos.y as Coordinate));
+    if (price == null) return;
+    chart.setCrosshairPosition(price, bar.time as Time, series);
   }, []);
 
   const yOfPrice = useCallback((p: number): number | null => {
@@ -599,14 +617,15 @@ export default function CandleChart({
       ctx.stroke();
     };
 
-    const drawOne = (d: Drawing, glow: "erase" | "move" | null, isDraft: boolean) => {
+    const drawOne = (d: Drawing, glow: "erase" | "move" | "sel" | null, isDraft: boolean) => {
       const color = colorOf(d);
       ctx.save();
       if (isDraft) ctx.setLineDash([5, 4]);
       const glowStroke = (trace: () => void, width: number) => {
         if (glow) {
           ctx.save();
-          ctx.strokeStyle = glow === "erase" ? "rgba(255,82,82,0.4)" : "rgba(130,180,255,0.45)";
+          ctx.strokeStyle =
+            glow === "erase" ? "rgba(255,82,82,0.4)" : glow === "sel" ? "rgba(130,180,255,0.3)" : "rgba(130,180,255,0.45)";
           ctx.lineWidth = width + 5;
           trace();
           ctx.stroke();
@@ -814,8 +833,9 @@ export default function CandleChart({
       draft && mouseDrawRef.current ? { id: "__draft", type: draft.type, a: draft.a, b: mouseDrawRef.current } : null;
     const eraseId = dragRef.current ? null : eraseHoverRef.current;
     const moveId = dragRef.current?.id ?? hoverRef.current?.id ?? null;
+    const selId = dragRef.current ? null : selectedRef.current;
     for (const d of drawingsRef.current) {
-      drawOne(d, eraseId === d.id ? "erase" : moveId === d.id ? "move" : null, false);
+      drawOne(d, eraseId === d.id ? "erase" : moveId === d.id ? "move" : selId === d.id ? "sel" : null, false);
     }
     if (preview) drawOne(preview, null, true);
   }, [xOf5m, yOfPrice]);
@@ -1102,6 +1122,7 @@ export default function CandleChart({
     setDrag(null);
     setHover(null);
     setEraseHoverId(null);
+    setSelectedId(null);
     setToolState(t);
     requestRedraw();
   };
@@ -1112,20 +1133,43 @@ export default function CandleChart({
       setDrawings([]);
       setEraseHoverId(null);
       setHover(null);
+      setSelectedId(null);
     }
   };
 
-  // Esc 取消进行中的绘制 / 退出工具 / 关闭画线设置
+  // Esc 取消进行中的绘制 / 退出工具 / 关闭画线设置 / 取消选中；Del 删除选中画线
   useEffect(() => {
-    if (tool === "none" && !settingsId) return;
+    if (tool === "none" && !settingsId && !selectedId) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      if (settingsId) closeSettings();
-      else setTool("none");
+      const target = e.target as HTMLElement | null;
+      const typing =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target != null && target.isContentEditable);
+      if (e.key === "Escape") {
+        if (settingsId) closeSettings();
+        else if (tool !== "none") setTool("none");
+        else if (selectedId) setSelectedId(null);
+        return;
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedId && !settingsId && !typing) {
+        e.preventDefault();
+        const id = selectedId;
+        setSelectedId(null);
+        setDrawings((prev) => prev.filter((d) => d.id !== id));
+        requestRedraw();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [tool, settingsId]);
+  }, [tool, settingsId, selectedId]);
+
+  // 选中状态变化时重绘（选中画线显示持续高亮）
+  useEffect(() => {
+    requestRedraw();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
 
   // ---- 画布交互 ----
   // mouseup 常驻监听：快速按下-抬起时 mouseup 可能先于 effect 挂载到达，
@@ -1240,10 +1284,14 @@ export default function CandleChart({
     const res = pointFromEvent(e);
     if (!res?.pt) return;
     const hit = hitTestEx(res.pos);
-    if (!hit) return;
+    if (!hit) {
+      if (selectedRef.current != null) setSelectedId(null);
+      return;
+    }
     const orig = drawingsRef.current.find((d) => d.id === hit.id);
     if (!orig) return;
     e.preventDefault();
+    if (selectedRef.current !== hit.id) setSelectedId(hit.id);
     dragRef.current = { id: hit.id, part: hit.part, startPt: res.pt, orig: JSON.parse(JSON.stringify(orig)) as Drawing };
     setDrag(hit);
   };
@@ -1251,6 +1299,7 @@ export default function CandleChart({
   const onCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const res = pointFromEvent(e);
     if (!res) return;
+    forwardCrosshair(res.pos);
     mousePxRef.current = res.pos;
     mouseDrawRef.current = res.pt;
     if (dragRef.current) {
@@ -1269,6 +1318,7 @@ export default function CandleChart({
   const onCanvasMouseLeave = () => {
     mousePxRef.current = null;
     mouseDrawRef.current = null;
+    chartRef.current?.clearCrosshairPosition();
     if (dragRef.current) return; // 拖拽中不移出（window mouseup 负责结束）
     setHover(null);
     setEraseHoverId(null);
@@ -1289,6 +1339,7 @@ export default function CandleChart({
       if (id) {
         setDrawings((prev) => prev.filter((d) => d.id !== id));
         setEraseHoverId(null);
+        setSelectedId((prev) => (prev === id ? null : prev));
         requestRedraw();
       }
       return;
@@ -1430,7 +1481,7 @@ export default function CandleChart({
       </div>
       {tool !== "none" && <div className="draw-hint">{TOOL_HINTS[tool]}</div>}
       {tool === "none" && !settingsId && drawings.length > 0 && (
-        <div className="draw-hint">双击画线可打开设置：精确价位 / 斐波那契水平 / 盈亏比目标 / 颜色</div>
+        <div className="draw-hint">单击画线选中（按 Del 删除，Esc 取消）；双击打开设置：精确价位 / 斐波那契水平 / 盈亏比目标 / 颜色</div>
       )}
 
       {settingsId &&
@@ -1565,7 +1616,7 @@ export default function CandleChart({
                       {settingsDraft.targets.map((r, i) => {
                         const price = d.a.p + (d.b.p < d.a.p ? 1 : -1) * Math.abs(d.a.p - d.b.p) * r;
                         return (
-                          <div className="ds-level-row" key={i}>
+                          <div className="ds-level-row pos" key={i}>
                             <input
                               type="number"
                               step="0.1"
